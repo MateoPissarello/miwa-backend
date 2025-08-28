@@ -5,9 +5,27 @@ from pydantic import ConfigDict
 from datetime import datetime
 
 
-class UserLogin(BaseModel):
+class User(BaseModel):
+    nickname: str = Field(..., min_length=1, max_length=50)
     email: EmailStr = Field(..., min_length=1, max_length=50)
+    address: str = Field(..., min_length=1, max_length=200)
+    birthdate: str = Field(..., description="User's birthdate")
+    gender: str = Field(..., min_length=1, max_length=20)
+    picture: str = Field(..., min_length=1)
+    phone_number: str = Field(..., min_length=1, max_length=20)
+    family_name: str = Field(..., min_length=1, max_length=50)
+    name: str = Field(..., min_length=1, max_length=50)
     password: str = Field(..., min_length=8, max_length=50)
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class UserConfirmCognito(BaseModel):
+    email: EmailStr
+    code: str
 
 
 class CreateUserBase(BaseModel):

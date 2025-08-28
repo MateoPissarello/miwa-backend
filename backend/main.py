@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from services.auth_service.router import router as auth_router
+from services.auth_service.cognito_router import router as cognito_router
 from services.s3_service.router import router as s3_router
 
 app = FastAPI(
@@ -26,6 +27,7 @@ def root():
 
 app.include_router(auth_router, tags=["Authentication"])
 app.include_router(s3_router)
+app.include_router(cognito_router, tags=["Cognito Authentication"])
 
 if __name__ == "__main__":
     import uvicorn
