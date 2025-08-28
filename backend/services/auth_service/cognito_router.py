@@ -16,6 +16,7 @@ def signup(user: User):
 def confirm(user_confirm: UserConfirmCognito):
     return auth_service.confirm_user(user_confirm.email, user_confirm.code)
 
+
 @router.post("/login")
 def login(user_login: UserLogin):
     return auth_service.login_user(user_login)

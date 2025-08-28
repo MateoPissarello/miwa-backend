@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     COGNITO_CLIENT_ID: str
     AWS_REGION: str
     COGNITO_SECRET: str
+    S3_BUCKET_ARN: str
 
     class Config:
         env_file = ".env"
