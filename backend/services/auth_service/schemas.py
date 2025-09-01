@@ -65,3 +65,14 @@ class UpdateUserBase(BaseModel):
     email: Optional[EmailStr] = Field(None, min_length=1, max_length=50)
     role: Optional[str] = Field(None, min_length=1, max_length=20)
     password: Optional[str] = Field(None, min_length=8, max_length=50)
+
+
+class MfaBeginReq(BaseModel):
+    session: str
+    email: EmailStr
+
+
+class MfaVerifyReq(BaseModel):
+    session: str
+    email: EmailStr
+    code: str

@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse
 from typing import Optional
 from fastapi.concurrency import run_in_threadpool
 from utils.RoleChecker import RoleChecker
-from utils.get_current_user import get_current_user
+from utils.get_current_user_cognito import get_current_user
 from .functions import S3Storage
 from sqlalchemy.orm import Session
 from database import get_db
