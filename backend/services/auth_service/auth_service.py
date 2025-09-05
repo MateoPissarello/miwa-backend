@@ -19,8 +19,8 @@ class AuthService:
         try:
             response = self.repo.confirm_user(email, code)
             return {"message": "User confirmed successfully", "response": response}
-        except HTTPException as e:
-            raise e
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     def login_user(self, user_login: UserLogin):
         """
