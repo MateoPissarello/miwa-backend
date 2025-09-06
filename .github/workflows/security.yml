@@ -1,0 +1,49 @@
+name: Seguridad CI
+
+on: [push, pull_request]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias backend
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r miwa-backend/backend/requirements.txt
+          pip install bandit safety semgrep
+
+      - name: Bandit SAST
+        run: bandit -r miwa-backend/
+
+      - name: Safety SCA
+        run: safety check -r miwa-backend/backend/requirements.txt
+
+      - name: Semgrep (backend)
+        run: semgrep --config=auto miwa-backend/
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Instalar dependencias frontend
+        run: |
+          cd miwa-frontend
+          npm install
+
+      - name: npm audit
+        run: |
+          cd miwa-frontend
+          npm audit --audit-level=moderate
+
+      - name: Semgrep (frontend)
+        run: semgrep --config=
