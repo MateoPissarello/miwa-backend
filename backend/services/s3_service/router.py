@@ -86,6 +86,8 @@ def presign_for_signup(req: PresignSignupReq):
 # (A) Stream the object bytes back to the client (simple; loads into memory)
 @router.get("/download/{key:path}")
 async def download_stream(key: str):
+    if ".." in key:
+        raise HTTPException(status_code=400, detail="Invalid key")
     s3: S3Storage = get_s3_storage()
     try:
         data: bytes = await run_in_threadpool(lambda: s3.download_as_bytes(key))
@@ -109,6 +111,8 @@ async def download_stream(key: str):
 # (B) Or: return a short‑lived presigned URL (best for large files/CDN browser downloads)
 @router.get("/download-url/{key:path}", response_model=str)
 async def download_url(key: str, expires_seconds: int = Query(900, ge=60, le=604800)):
+    if ".." in key:
+        raise HTTPException(status_code=400, detail="Invalid key")
     s3: S3Storage = get_s3_storage()
     try:
         url = await run_in_threadpool(lambda: s3.presign_get_url(key, expires_seconds=expires_seconds))
