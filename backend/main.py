@@ -27,10 +27,10 @@ def root():
     return {"message": "¡Bienvenido a la API de MIWA!"}
 
 
-app.include_router(s3_router)
-app.include_router(cognito_router)
-app.include_router(calendar_integration_router)
-app.include_router(calendar_router)
+app.include_router(s3_router, prefix="/api")
+app.include_router(cognito_router, prefix="/api")
+app.include_router(calendar_integration_router, prefix="/api")
+app.include_router(calendar_router, prefix="/api")
 if __name__ == "__main__":
     import uvicorn
 
