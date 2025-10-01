@@ -21,6 +21,8 @@ class TokenData(BaseModel):
     scope: Optional[str] = None  # "aws.cognito.signin.user.admin" o tus custom scopes
     token_use: str  # "access" o "id"
     exp: int
+    user_id: Optional[int] = None
+    role: Optional[str] = None
 
 
 @lru_cache(maxsize=1)
