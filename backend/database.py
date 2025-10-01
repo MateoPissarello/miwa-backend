@@ -1,25 +1,47 @@
-# database.py
+"""Database helpers wired through the runtime kernel."""
+
+from __future__ import annotations
+
+from typing import Generator, Optional
+
 from sqlalchemy import create_engine
-import os
-from dotenv import load_dotenv
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Load environment variables from .env file
-load_dotenv()
+from core.config import Settings
 
-# Get the database URL from environment variables or use a default value
-
-
-DATABASE_URL = f"postgresql+psycopg2://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"  # noqa
-
-engine = create_engine(DATABASE_URL, echo=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
+_engine: Optional[Engine] = None
+_session_factory: Optional[sessionmaker] = None
 
-def get_db():
-    db = SessionLocal()
+
+def configure_database(settings: Settings, *, echo: bool | None = None) -> None:
+    """Create the SQLAlchemy engine/session factory using the provided settings."""
+
+    global _engine, _session_factory
+    _engine = create_engine(settings.DATABASE_URL, echo=echo)
+    _session_factory = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+
+
+def get_engine() -> Engine:
+    if _engine is None:
+        raise RuntimeError("Database engine not configured. Did you initialize the kernel?")
+    return _engine
+
+
+def get_session_factory() -> sessionmaker:
+    if _session_factory is None:
+        raise RuntimeError("Session factory not configured. Did you initialize the kernel?")
+    return _session_factory
+
+
+def get_db() -> Generator:
+    """FastAPI dependency that yields a database session."""
+
+    session = get_session_factory()
+    db = session()
     try:
         yield db
     finally:
