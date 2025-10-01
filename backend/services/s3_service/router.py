@@ -4,11 +4,10 @@ from fastapi.responses import StreamingResponse
 from typing import Optional
 from fastapi.concurrency import run_in_threadpool
 from utils.RoleChecker import RoleChecker
-from utils.get_current_user_cognito import get_current_user
+from utils.get_current_user_cognito import TokenData, get_current_user
 from .functions import S3Storage
 from sqlalchemy.orm import Session
 from database import get_db
-from utils.schemas import TokenData
 from .schemas import PresignSignupReq
 import uuid
 import mimetypes
@@ -16,7 +15,7 @@ from .deps import get_s3_storage
 
 router = APIRouter(prefix="/s3", tags=["s3"])
 
-all_users = RoleChecker(["user", "admin"])
+all_users = RoleChecker(["client", "admin"])
 
 
 @router.post("/upload", response_model=str)
@@ -29,6 +28,8 @@ async def upload_endpoint(
     s3: S3Storage = get_s3_storage()
     try:
         email = current_user.email
+        if email is None:
+            raise HTTPException(status_code=401, detail="Email claim missing in token")
         # Upload and return a presigned GET URL (private-by-default)
         url = await run_in_threadpool(
             lambda: s3.upload_fileobj(
@@ -51,6 +52,8 @@ async def list_endpoint(
     s3: S3Storage = get_s3_storage()
     try:
         email = current_user.email
+        if email is None:
+            raise HTTPException(status_code=401, detail="Email claim missing in token")
         prefix = f"{folder}/{email}/"
         keys = await run_in_threadpool(lambda: s3.list_keys(prefix=prefix, max_items=max_items))
         return keys

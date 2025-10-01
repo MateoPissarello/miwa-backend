@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 from fastapi import status as response_status
-from utils.schemas import TokenData
 from fastapi import Body, Depends, HTTPException
 from database import get_db
 from utils.password_hasher import Hash
@@ -11,8 +10,7 @@ from services.auth_service.schemas import CreateUserBase, RetrieveUserBase
 from models import User
 from services.auth_service.functions import create_user
 from utils.RoleChecker import RoleChecker
-from utils.get_current_user import get_current_user
-from utils.jwt_handler import create_access_token
+from utils.get_current_user_cognito import TokenData, get_current_user
 from .functions import update_last_login, get_all_users, update_user_data
 from typing import List
 import requests
@@ -25,8 +23,8 @@ API_GATEWAY_URL = os.getenv("API_GATEWAY_URL", "https://example.com/lambda-endpo
 hash = Hash()
 
 
-@router.post("/login", status_code=response_status.HTTP_200_OK)
-async def login(data: UserLogin = Body(...), db: Session = Depends(get_db)):
+@router.post("/login", response_model=RetrieveUserBase, status_code=response_status.HTTP_200_OK)
+async def login(data: UserLogin = Body(...), db: Session = Depends(get_db)) -> RetrieveUserBase:
     try:
         user_data = base_login(db, data)
     except HTTPException as e:
@@ -41,23 +39,11 @@ async def login(data: UserLogin = Body(...), db: Session = Depends(get_db)):
                 detail="Invalid credentials",
             )
     usr_obj = update_last_login(user_data, db)
-    user_data = TokenData(
-        sub=str(usr_obj.user_id),
-        user_id=usr_obj.user_id,
-        role=usr_obj.role.value,
-        email=usr_obj.email,
-    )
-    print(user_data)
-
-    access_token = create_access_token(data=user_data.model_dump())
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-    }
+    return RetrieveUserBase.model_validate(usr_obj)
 
 
-@router.post("/admin/login", status_code=response_status.HTTP_200_OK)
-async def admin_login(data: UserLogin = Body(...), db: Session = Depends(get_db)):
+@router.post("/admin/login", response_model=RetrieveUserBase, status_code=response_status.HTTP_200_OK)
+async def admin_login(data: UserLogin = Body(...), db: Session = Depends(get_db)) -> RetrieveUserBase:
     try:
         user = base_login(db, data)
     except HTTPException as e:
@@ -77,17 +63,7 @@ async def admin_login(data: UserLogin = Body(...), db: Session = Depends(get_db)
             detail="You are not authorized to access this resource",
         )
     user_data = update_last_login(user, db)
-    user_data = TokenData(
-        sub=str(user_data.user_id),
-        user_id=user_data.user_id,
-        role=user_data.role.value,
-        email=user_data.email,
-    )
-    access_token = create_access_token(data=user_data.model_dump())
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-    }
+    return RetrieveUserBase.model_validate(user_data)
 
 
 @router.post("/signup", response_model=RetrieveUserBase, status_code=response_status.HTTP_201_CREATED)
