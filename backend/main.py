@@ -1,25 +1,34 @@
+"""Application entry point bootstrapping the microkernel and plugins."""
+
+from __future__ import annotations
+
 import os
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from services.auth_service.router import router as auth_router
-from services.auth_service.cognito_router import router as cognito_router
-from services.s3_service.router import router as s3_router
-from services.calendar_service.integration_router import router as calendar_integration_router
-from services.calendar_service.calendar_router import router as calendar_router
 
-app = FastAPI(
-    debug=os.getenv("DEBUG", False),
-    title="MIWA Backend",
-)
+from kernel import Kernel
+from services.auth_service.plugin import AuthPlugin
+from services.calendar_service.plugin import CalendarPlugin
+from services.s3_service.plugin import S3Plugin
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+def _env_flag(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def create_kernel() -> Kernel:
+    debug = _env_flag(os.getenv("DEBUG"))
+    kernel = Kernel(debug=debug)
+    kernel.register_plugin(S3Plugin())
+    kernel.register_plugin(AuthPlugin())
+    kernel.register_plugin(CalendarPlugin())
+    return kernel
+
+
+kernel = create_kernel()
+app: FastAPI = kernel.app
 
 
 @app.get("/")
@@ -27,10 +36,6 @@ def root():
     return {"message": "¡Bienvenido a la API de MIWA!"}
 
 
-app.include_router(s3_router, prefix="/api")
-app.include_router(cognito_router, prefix="/api")
-app.include_router(calendar_integration_router, prefix="/api")
-app.include_router(calendar_router, prefix="/api")
 if __name__ == "__main__":
     import uvicorn
 
