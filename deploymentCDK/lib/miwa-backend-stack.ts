@@ -11,9 +11,9 @@ import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ecsPatterns from "aws-cdk-lib/aws-ecs-patterns";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as rds from "aws-cdk-lib/aws-rds";
 import * as route53 from "aws-cdk-lib/aws-route53";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
-import * as rds from "aws-cdk-lib/aws-rds";
 import { Construct } from "constructs";
 
 export interface MiwaBackendStackProps extends StackProps {
@@ -57,41 +57,31 @@ export class MiwaBackendStack extends Stack {
 
     const databaseName = "miwa_backend";
 
-    const databaseSecurityGroup = new ec2.SecurityGroup(
-      this,
-      "MiwaDatabaseSecurityGroup",
-      {
-        vpc,
-        description: "Security group for the Miwa Aurora PostgreSQL cluster",
-        allowAllOutbound: true,
-      }
-    );
+    const databaseSecurityGroup = new ec2.SecurityGroup(this, "MiwaDbSg", {
+      vpc,
+      description: "SG for MIWA Aurora Serverless v2",
+      allowAllOutbound: true,
+    });
 
-    const databaseCluster = new rds.ServerlessCluster(
-      this,
-      "MiwaDatabase",
-      {
-        vpc,
-        vpcSubnets: {
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-        },
-        clusterIdentifier: "miwa-backend-aurora-postgres",
-        engine: rds.DatabaseClusterEngine.auroraPostgres({
-          version: rds.AuroraPostgresEngineVersion.VER_15_2,
-        }),
-        credentials: rds.Credentials.fromGeneratedSecret("postgres"),
-        defaultDatabaseName: databaseName,
-        scaling: {
-          autoPause: Duration.minutes(10),
-          minCapacity: rds.AuroraCapacityUnit.ACU_2,
-          maxCapacity: rds.AuroraCapacityUnit.ACU_8,
-        },
-        backupRetention: Duration.days(1),
-        removalPolicy: RemovalPolicy.DESTROY,
-        securityGroups: [databaseSecurityGroup],
-        copyTagsToSnapshot: true,
-      }
-    );
+    // Aurora Serverless v2 (reemplaza ServerlessCluster v1)
+    const databaseCluster = new rds.DatabaseCluster(this, "MiwaDatabase", {
+      engine: rds.DatabaseClusterEngine.auroraPostgres({
+        // Versión soportada por Serverless v2
+        version: rds.AuroraPostgresEngineVersion.VER_15_3,
+      }),
+      credentials: rds.Credentials.fromGeneratedSecret("postgres"),
+      defaultDatabaseName: databaseName,
+      writer: rds.ClusterInstance.serverlessV2("writer"),
+      // readers: [rds.ClusterInstance.serverlessV2("reader")], // opcional
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [databaseSecurityGroup],
+      serverlessV2MinCapacity: 0.5, // ACU
+      serverlessV2MaxCapacity: 8,   // ACU
+      backup: { retention: Duration.days(1) },
+      removalPolicy: RemovalPolicy.DESTROY,
+      copyTagsToSnapshot: true,
+    });
 
     this.repository = new ecr.Repository(this, "MiwaBackendRepository", {
       repositoryName: "miwa-backend",
@@ -155,21 +145,22 @@ export class MiwaBackendStack extends Stack {
       `miwa-MySecret`,
       "arn:aws:secretsmanager:us-east-1:225989373192:secret:dev/miwa/app-qcbDUm"
     );
+
     const containerSecrets: Record<string, ecs.Secret> = {};
     for (const key of secretKeys) {
       containerSecrets[key] = ecs.Secret.fromSecretsManager(mySecrets, key);
     }
 
     if (databaseCluster.secret) {
-      containerSecrets["DATABASE_USERNAME"] = ecs.Secret.fromSecretsManager(
+      containerSecrets["DB_USER"] = ecs.Secret.fromSecretsManager(
         databaseCluster.secret,
         "username"
       );
-      containerSecrets["DATABASE_PASSWORD"] = ecs.Secret.fromSecretsManager(
+      containerSecrets["DB_PASSWORD"] = ecs.Secret.fromSecretsManager(
         databaseCluster.secret,
         "password"
       );
-      containerSecrets["DATABASE_SECRET_ARN"] = ecs.Secret.fromSecretsManager(
+      containerSecrets["DB_SECRET_ARN"] = ecs.Secret.fromSecretsManager(
         databaseCluster.secret
       );
     }
@@ -196,9 +187,9 @@ export class MiwaBackendStack extends Stack {
           }),
           environment: {
             ENVIRONMENT: "production",
-            DATABASE_HOST: databaseCluster.clusterEndpoint.hostname,
-            DATABASE_PORT: databaseCluster.clusterEndpoint.port.toString(),
-            DATABASE_NAME: databaseName,
+            DB_HOST: databaseCluster.clusterEndpoint.hostname,
+            DB_PORT: databaseCluster.clusterEndpoint.port.toString(),
+            DB_NAME: databaseName,
           },
           secrets: containerSecrets,
           image: ecs.ContainerImage.fromEcrRepository(
