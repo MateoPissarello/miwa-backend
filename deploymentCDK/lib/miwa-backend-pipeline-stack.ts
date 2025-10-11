@@ -41,20 +41,28 @@ export class MiwaBackendPipelineStack extends Stack {
         phases: {
           pre_build: {
             commands: [
-              'VERSION=$(cat version.txt)',
+              // Obtiene VERSION desde version.txt si existe; si no, usa el commit corto de CodeBuild
+              'if [ -f version.txt ]; then VERSION="$(cat version.txt)"; else VERSION="$(echo ${CODEBUILD_RESOLVED_SOURCE_VERSION} | cut -c1-7)"; fi',
               'echo "Building version ${VERSION}"',
-              'aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $REPOSITORY_URI',
+              'aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$REPOSITORY_URI"',
             ],
           },
           build: {
             commands: [
-              'docker build -t $REPOSITORY_URI:$VERSION -f Dockerfile .',
-              'docker push $REPOSITORY_URI:$VERSION',
+              'docker build -t "$REPOSITORY_URI:$VERSION" -f Dockerfile .',
+              'docker push "$REPOSITORY_URI:$VERSION"',
             ],
           },
           post_build: {
             commands: [
-              'printf "[{\"name\":\"%s\",\"imageUri\":\"%s\"}]" "$CONTAINER_NAME" "$REPOSITORY_URI:$VERSION" > imagedefinitions.json',
+              // Generación robusta del imagedefinitions.json
+              "cat > imagedefinitions.json <<'EOF'\n[\n  {\n    \"name\": \"__NAME__\",\n    \"imageUri\": \"__IMAGE__\"\n  }\n]\nEOF",
+              'sed -i "s|__NAME__|${CONTAINER_NAME}|g" imagedefinitions.json',
+              'sed -i "s|__IMAGE__|${REPOSITORY_URI}:${VERSION}|g" imagedefinitions.json',
+              // Validación opcional (falla el build si el JSON es inválido)
+              "python - <<'PY'\nimport json; json.load(open('imagedefinitions.json')); print('imagedefinitions.json OK')\nPY",
+              'echo "Generated imagedefinitions.json:"',
+              'cat imagedefinitions.json',
             ],
           },
         },
@@ -64,6 +72,7 @@ export class MiwaBackendPipelineStack extends Stack {
       }),
     });
 
+    // Permisos para push/pull en ECR
     props.repository.grantPullPush(buildProject);
 
     const pipeline = new codepipeline.Pipeline(this, 'MiwaBackendPipeline', {

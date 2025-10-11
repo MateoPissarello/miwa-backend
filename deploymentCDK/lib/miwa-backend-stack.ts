@@ -7,6 +7,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as certificatemanager from 'aws-cdk-lib/aws-certificatemanager';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 
 export interface MiwaBackendStackProps extends StackProps {
   readonly cpu?: number;
@@ -82,6 +83,34 @@ export class MiwaBackendStack extends Stack {
 
     const imageTag = props.imageTag ?? 'latest';
 
+    const secretKeys = [
+      "SECRET_KEY",
+      "ALGORITHM",
+      "ACCESS_TOKEN_EXPIRE_MINUTES",
+      "API_GATEWAY_URL",
+      "S3_BUCKET_ARN",
+      "COGNITO_USER_POOL_ID",
+      "AWS_REGION",
+      "COGNITO_CLIENT_ID",
+      "COGNITO_SECRET",
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "GOOGLE_REDIRECT_URI",
+      "GOOGLE_AFTER_CONNECT",
+      "DYNAMO_GOOGLE_TOKENS_TABLE",
+      "GOOGLE_STATE_SECRET",
+    ];
+
+    const mySecrets = Secret.fromSecretCompleteArn(
+      this,
+      `miwa-MySecret`,
+      "arn:aws:secretsmanager:us-east-1:891377180652:secret:prod/fixcode/secrets-bW3bT4"
+    );
+    const containerSecrets: Record<string, ecs.Secret> = {};
+    for (const key of secretKeys) {
+      containerSecrets[key] = ecs.Secret.fromSecretsManager(mySecrets, key);
+    }
+
     this.service = new ecsPatterns.ApplicationLoadBalancedFargateService(this, 'MiwaBackendService', {
       cluster: this.cluster,
       cpu: props.cpu ?? 512,
@@ -102,7 +131,9 @@ export class MiwaBackendStack extends Stack {
         environment: {
           ENVIRONMENT: 'production',
         },
+        secrets: containerSecrets,
         image: ecs.ContainerImage.fromEcrRepository(this.repository, imageTag),
+        
       },
     });
 
