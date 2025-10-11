@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     DYNAMO_GOOGLE_TOKENS_TABLE: str
     GOOGLE_STATE_SECRET: str
     GOOGLE_AFTER_CONNECT: str
+    DB_USER: str
+    DB_PASSWORD: str
+    DB_HOST: str
+    DB_PORT: str
+    DB_NAME: str
 
     class Config:
         env_file = ".env"
@@ -40,10 +45,7 @@ class Settings(BaseSettings):
     def DATABASE_URL(self) -> str:
         """Build the SQLAlchemy database URL from the configured credentials."""
 
-        return (
-            f"postgresql+psycopg2://{self.DB_USER}:{self.DB_PASSWORD}"
-            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
-        )
+        return f"postgresql+psycopg2://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
 
 _settings: Optional[Settings] = None
