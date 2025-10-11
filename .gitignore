@@ -220,4 +220,10 @@ pyrightconfig.json
 pyvenv.cfg
 pip-selfcheck.json
 
+# Allow CDK TypeScript sources
+!deploymentCDK/bin/
+!deploymentCDK/bin/**/*.ts
+!deploymentCDK/lib/
+!deploymentCDK/lib/**/*.ts
+
 # End of https://www.toptal.com/developers/gitignore/api/python,venv,nextjs
