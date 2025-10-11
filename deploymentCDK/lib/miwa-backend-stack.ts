@@ -13,6 +13,7 @@ import * as ecsPatterns from "aws-cdk-lib/aws-ecs-patterns";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as route53 from "aws-cdk-lib/aws-route53";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
+import * as rds from "aws-cdk-lib/aws-rds";
 import { Construct } from "constructs";
 
 export interface MiwaBackendStackProps extends StackProps {
@@ -53,6 +54,44 @@ export class MiwaBackendStack extends Stack {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
     });
+
+    const databaseName = "miwa_backend";
+
+    const databaseSecurityGroup = new ec2.SecurityGroup(
+      this,
+      "MiwaDatabaseSecurityGroup",
+      {
+        vpc,
+        description: "Security group for the Miwa Aurora PostgreSQL cluster",
+        allowAllOutbound: true,
+      }
+    );
+
+    const databaseCluster = new rds.ServerlessCluster(
+      this,
+      "MiwaDatabase",
+      {
+        vpc,
+        vpcSubnets: {
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+        },
+        clusterIdentifier: "miwa-backend-aurora-postgres",
+        engine: rds.DatabaseClusterEngine.auroraPostgres({
+          version: rds.AuroraPostgresEngineVersion.VER_15_2,
+        }),
+        credentials: rds.Credentials.fromGeneratedSecret("postgres"),
+        defaultDatabaseName: databaseName,
+        scaling: {
+          autoPause: Duration.minutes(10),
+          minCapacity: rds.AuroraCapacityUnit.ACU_2,
+          maxCapacity: rds.AuroraCapacityUnit.ACU_8,
+        },
+        backupRetention: Duration.days(1),
+        removalPolicy: RemovalPolicy.DESTROY,
+        securityGroups: [databaseSecurityGroup],
+        copyTagsToSnapshot: true,
+      }
+    );
 
     this.repository = new ecr.Repository(this, "MiwaBackendRepository", {
       repositoryName: "miwa-backend",
@@ -121,6 +160,20 @@ export class MiwaBackendStack extends Stack {
       containerSecrets[key] = ecs.Secret.fromSecretsManager(mySecrets, key);
     }
 
+    if (databaseCluster.secret) {
+      containerSecrets["DATABASE_USERNAME"] = ecs.Secret.fromSecretsManager(
+        databaseCluster.secret,
+        "username"
+      );
+      containerSecrets["DATABASE_PASSWORD"] = ecs.Secret.fromSecretsManager(
+        databaseCluster.secret,
+        "password"
+      );
+      containerSecrets["DATABASE_SECRET_ARN"] = ecs.Secret.fromSecretsManager(
+        databaseCluster.secret
+      );
+    }
+
     this.service = new ecsPatterns.ApplicationLoadBalancedFargateService(
       this,
       "MiwaBackendService",
@@ -143,6 +196,9 @@ export class MiwaBackendStack extends Stack {
           }),
           environment: {
             ENVIRONMENT: "production",
+            DATABASE_HOST: databaseCluster.clusterEndpoint.hostname,
+            DATABASE_PORT: databaseCluster.clusterEndpoint.port.toString(),
+            DATABASE_NAME: databaseName,
           },
           secrets: containerSecrets,
           image: ecs.ContainerImage.fromEcrRepository(
@@ -154,6 +210,12 @@ export class MiwaBackendStack extends Stack {
     );
 
     this.repository.grantPull(this.service.taskDefinition.executionRole!);
+
+    databaseCluster.connections.allowFrom(
+      this.service.service,
+      ec2.Port.tcp(5432),
+      "Allow ECS tasks to reach the Aurora PostgreSQL cluster"
+    );
 
     this.service.targetGroup.configureHealthCheck({
       healthyHttpCodes: "200-399",
