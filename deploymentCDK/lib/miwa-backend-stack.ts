@@ -9,10 +9,12 @@ import * as certificatemanager from "aws-cdk-lib/aws-certificatemanager";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
-import * as ecsPatterns from "aws-cdk-lib/aws-ecs-patterns";
+import * as elasticloadbalancingv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import * as iam from "aws-cdk-lib/aws-iam"; // Importar IAM para manejar permisos directamente
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as route53 from "aws-cdk-lib/aws-route53";
+import * as route53_targets from "aws-cdk-lib/aws-route53-targets";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { Construct } from "constructs";
 
@@ -22,6 +24,7 @@ export interface MiwaBackendStackProps extends StackProps {
   readonly desiredCount?: number;
   readonly domain?: MiwaBackendDomainProps;
   readonly imageTag?: string;
+  readonly frontendImageTag?: string;
 }
 
 export interface MiwaBackendDomainProps {
@@ -33,8 +36,11 @@ export interface MiwaBackendDomainProps {
 
 export class MiwaBackendStack extends Stack {
   public readonly repository: ecr.Repository;
+  public readonly frontendRepository: ecr.Repository;
   public readonly cluster: ecs.Cluster;
-  public readonly service: ecsPatterns.ApplicationLoadBalancedFargateService;
+  public readonly backendService: ecs.FargateService;
+  public readonly frontendService: ecs.FargateService;
+  public readonly loadBalancer: elasticloadbalancingv2.ApplicationLoadBalancer;
 
   constructor(scope: Construct, id: string, props: MiwaBackendStackProps = {}) {
     super(scope, id, props);
@@ -46,11 +52,18 @@ export class MiwaBackendStack extends Stack {
 
     this.cluster = new ecs.Cluster(this, "MiwaCluster", {
       vpc,
+      // Se mantiene containerInsights: true aunque esté deprecated.
       containerInsights: true,
     });
 
-    const logGroup = new logs.LogGroup(this, "MiwaBackendLogs", {
+    const backendLogGroup = new logs.LogGroup(this, "MiwaBackendLogs", {
       logGroupName: `/aws/ecs/miwa-backend`,
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const frontendLogGroup = new logs.LogGroup(this, "MiwaFrontendLogs", {
+      logGroupName: `/aws/ecs/miwa-frontend`,
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
     });
@@ -63,26 +76,25 @@ export class MiwaBackendStack extends Stack {
       allowAllOutbound: true,
     });
 
-    // Aurora Serverless v2 (reemplaza ServerlessCluster v1)
+    // Aurora Serverless v2
     const databaseCluster = new rds.DatabaseCluster(this, "MiwaDatabase", {
       engine: rds.DatabaseClusterEngine.auroraPostgres({
-        // Versión soportada por Serverless v2
         version: rds.AuroraPostgresEngineVersion.VER_15_3,
       }),
       credentials: rds.Credentials.fromGeneratedSecret("postgres"),
       defaultDatabaseName: databaseName,
       writer: rds.ClusterInstance.serverlessV2("writer"),
-      // readers: [rds.ClusterInstance.serverlessV2("reader")], // opcional
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       securityGroups: [databaseSecurityGroup],
-      serverlessV2MinCapacity: 0.5, // ACU
-      serverlessV2MaxCapacity: 8,   // ACU
+      serverlessV2MinCapacity: 0.5,
+      serverlessV2MaxCapacity: 8,
       backup: { retention: Duration.days(1) },
       removalPolicy: RemovalPolicy.DESTROY,
       copyTagsToSnapshot: true,
     });
 
+    // Backend Repository
     this.repository = new ecr.Repository(this, "MiwaBackendRepository", {
       repositoryName: "miwa-backend",
       imageScanOnPush: true,
@@ -94,6 +106,22 @@ export class MiwaBackendStack extends Stack {
       ],
     });
 
+    // Frontend Repository
+    this.frontendRepository = new ecr.Repository(
+      this,
+      "MiwaFrontendRepository",
+      {
+        repositoryName: "miwa-frontend",
+        imageScanOnPush: true,
+        lifecycleRules: [
+          {
+            description: "Retain only the 30 most recent images",
+            maxImageCount: 30,
+          },
+        ],
+      }
+    );
+
     let domainName: string | undefined;
     let domainZone: route53.IHostedZone | undefined;
     let certificate: certificatemanager.ICertificate | undefined;
@@ -102,6 +130,7 @@ export class MiwaBackendStack extends Stack {
       domainName = props.domain.subdomain
         ? `${props.domain.subdomain}.${props.domain.zoneName}`
         : props.domain.zoneName;
+
       domainZone = route53.HostedZone.fromHostedZoneAttributes(
         this,
         "MiwaBackendZone",
@@ -120,7 +149,40 @@ export class MiwaBackendStack extends Stack {
       }
     }
 
-    const imageTag = props.imageTag ?? "latest";
+    const backendImageTag = props.imageTag ?? "latest";
+    const frontendImageTag = props.frontendImageTag ?? "latest";
+
+    // --- CORRECCIÓN CLAVE: Agrupar la inyección de secretos ---
+
+    // 1. Definición de la tarea Fargate
+    const backendTask = new ecs.FargateTaskDefinition(this, "backend-task", {
+      memoryLimitMiB: props.memoryLimitMiB ?? 1024,
+      cpu: props.cpu ?? 512,
+    });
+
+    // 2. Definición del Secreto Principal
+    const mySecrets = Secret.fromSecretCompleteArn(
+      this,
+      `miwa-MySecret`,
+      "arn:aws:secretsmanager:us-east-1:225989373192:secret:dev/miwa/app-qcbDUm"
+    );
+
+    // 3. Crear una única declaración de política para leer el secreto principal
+    // Esto evita que el CDK cree 15+ declaraciones que causan el error.
+    backendTask.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+        ],
+        resources: [mySecrets.secretArn],
+        effect: iam.Effect.ALLOW,
+      })
+    );
+
+    // 4. Se inyectan los secretos individuales (estos son los que causan las declaraciones)
+    // El CDK usará el permiso que acabamos de agregar para inyectar estos valores.
+    const backendContainerSecrets: Record<string, ecs.Secret> = {};
 
     const secretKeys = [
       "SECRET_KEY",
@@ -140,106 +202,271 @@ export class MiwaBackendStack extends Stack {
       "GOOGLE_STATE_SECRET",
     ];
 
-    const mySecrets = Secret.fromSecretCompleteArn(
-      this,
-      `miwa-MySecret`,
-      "arn:aws:secretsmanager:us-east-1:225989373192:secret:dev/miwa/app-qcbDUm"
-    );
-
-    const containerSecrets: Record<string, ecs.Secret> = {};
     for (const key of secretKeys) {
-      containerSecrets[key] = ecs.Secret.fromSecretsManager(mySecrets, key);
+      // El CDK intentará agregar permisos, pero ya tiene el permiso global
+      backendContainerSecrets[key] = ecs.Secret.fromSecretsManager(
+        mySecrets,
+        key
+      );
     }
 
+    // 5. Se añaden los secretos de la DB, asegurando que se les otorguen permisos.
     if (databaseCluster.secret) {
-      containerSecrets["DB_USER"] = ecs.Secret.fromSecretsManager(
+      backendContainerSecrets["DB_USER"] = ecs.Secret.fromSecretsManager(
         databaseCluster.secret,
         "username"
       );
-      containerSecrets["DB_PASSWORD"] = ecs.Secret.fromSecretsManager(
+      backendContainerSecrets["DB_PASSWORD"] = ecs.Secret.fromSecretsManager(
         databaseCluster.secret,
         "password"
       );
-      containerSecrets["DB_SECRET_ARN"] = ecs.Secret.fromSecretsManager(
+      // Incluir una sola inyección del ARN del secreto de la DB.
+      backendContainerSecrets["DB_SECRET_ARN"] = ecs.Secret.fromSecretsManager(
         databaseCluster.secret
       );
     }
+    // Asegurarse de que el rol de la tarea pueda leer el secreto de la DB
+    if (databaseCluster.secret) {
+      databaseCluster.secret.grantRead(backendTask.taskRole);
+    }
 
-    this.service = new ecsPatterns.ApplicationLoadBalancedFargateService(
+    // --- Fin de la corrección de secretos ---
+
+    // Load Balancer + SG
+    const sg = new ec2.SecurityGroup(this, "ALB-SG", {
+      vpc,
+      allowAllOutbound: true,
+      description: "Security group for ALB",
+    });
+    sg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), "Allow HTTP");
+    sg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), "Allow HTTPS");
+
+    this.loadBalancer = new elasticloadbalancingv2.ApplicationLoadBalancer(
       this,
-      "MiwaBackendService",
+      "MiwaALB",
       {
-        cluster: this.cluster,
-        cpu: props.cpu ?? 512,
-        desiredCount: props.desiredCount ?? 1,
-        memoryLimitMiB: props.memoryLimitMiB ?? 1024,
-        publicLoadBalancer: true,
-        listenerPort: 80,
-        domainName,
-        domainZone,
-        certificate,
-        taskImageOptions: {
-          containerName: "miwa-backend",
-          containerPort: 80,
-          logDriver: ecs.LogDrivers.awsLogs({
-            streamPrefix: "miwa-backend",
-            logGroup,
-          }),
-          environment: {
-            ENVIRONMENT: "production",
-            DB_HOST: databaseCluster.clusterEndpoint.hostname,
-            DB_PORT: databaseCluster.clusterEndpoint.port.toString(),
-            DB_NAME: databaseName,
-          },
-          secrets: containerSecrets,
-          image: ecs.ContainerImage.fromEcrRepository(
-            this.repository,
-            imageTag
-          ),
-        },
+        vpc,
+        internetFacing: true,
+        securityGroup: sg,
       }
     );
 
-    this.repository.grantPull(this.service.taskDefinition.executionRole!);
+    // Listeners (crear solo UNA instancia por puerto)
+    const httpListener = this.loadBalancer.addListener("http-listener", {
+      port: 80,
+      protocol: elasticloadbalancingv2.ApplicationProtocol.HTTP,
+    });
+
+    let httpsListener: elasticloadbalancingv2.ApplicationListener | undefined;
+    if (certificate && domainName) {
+      httpsListener = this.loadBalancer.addListener("https-listener", {
+        port: 443,
+        protocol: elasticloadbalancingv2.ApplicationProtocol.HTTPS,
+        certificates: [certificate],
+      });
+
+      // Redirección HTTP → HTTPS
+      httpListener.addAction("redirect-https", {
+        action: elasticloadbalancingv2.ListenerAction.redirect({
+          protocol: "HTTPS",
+          port: "443",
+          permanent: true,
+        }),
+      });
+
+      // DNS
+      if (domainZone) {
+        new route53.ARecord(this, "MiwaAliasRecord", {
+          zone: domainZone,
+          target: route53.RecordTarget.fromAlias(
+            new route53_targets.LoadBalancerTarget(this.loadBalancer)
+          ),
+          recordName: domainName,
+        });
+      }
+    }
+
+    // Backend container definition
+    backendTask.addContainer("miwa-backend", {
+      image: ecs.ContainerImage.fromEcrRepository(
+        this.repository,
+        backendImageTag
+      ),
+      containerName: "miwa-backend",
+      portMappings: [{ containerPort: 80, protocol: ecs.Protocol.TCP }],
+      logging: ecs.LogDriver.awsLogs({
+        streamPrefix: "miwa-backend",
+        logGroup: backendLogGroup,
+      }),
+      environment: {
+        ENVIRONMENT: "production",
+        DB_HOST: databaseCluster.clusterEndpoint.hostname,
+        DB_PORT: databaseCluster.clusterEndpoint.port.toString(),
+        DB_NAME: databaseName,
+      },
+      secrets: backendContainerSecrets,
+    });
+
+    this.repository.grantPull(backendTask.executionRole!);
+
+    // Backend Service
+    this.backendService = new ecs.FargateService(this, "backend-service", {
+      cluster: this.cluster,
+      taskDefinition: backendTask,
+      desiredCount: props.desiredCount ?? 1,
+      assignPublicIp: false,
+    });
 
     databaseCluster.connections.allowFrom(
-      this.service.service,
+      this.backendService,
       ec2.Port.tcp(5432),
-      "Allow ECS tasks to reach the Aurora PostgreSQL cluster"
+      "Allow backend to reach Aurora"
     );
 
-    this.service.targetGroup.configureHealthCheck({
-      healthyHttpCodes: "200-399",
-      path: "/",
-      interval: Duration.seconds(30),
-      timeout: Duration.seconds(10),
-      healthyThresholdCount: 2,
-      unhealthyThresholdCount: 3,
+    // Frontend Task Definition
+    const frontendTask = new ecs.FargateTaskDefinition(this, "frontend-task", {
+      memoryLimitMiB: 512,
+      cpu: 256,
     });
 
-    const scalableTarget = this.service.service.autoScaleTaskCount({
-      minCapacity: 1,
-      maxCapacity: 4,
+    frontendTask.addContainer("miwa-frontend", {
+      image: ecs.ContainerImage.fromEcrRepository(
+        this.frontendRepository,
+        frontendImageTag
+      ),
+      containerName: "miwa-frontend",
+      portMappings: [{ containerPort: 3000, protocol: ecs.Protocol.TCP }],
+      logging: ecs.LogDriver.awsLogs({
+        streamPrefix: "miwa-frontend",
+        logGroup: frontendLogGroup,
+      }),
+      environment: {
+        ENVIRONMENT: "production",
+        NEXT_PUBLIC_API_URL:
+          certificate && domainName
+            ? `https://${domainName}/api`
+            : `http://${this.loadBalancer.loadBalancerDnsName}/api`,
+      },
     });
 
-    scalableTarget.scaleOnCpuUtilization("CpuScaling", {
-      targetUtilizationPercent: 60,
-      scaleInCooldown: Duration.seconds(60),
-      scaleOutCooldown: Duration.seconds(60),
+    this.frontendRepository.grantPull(frontendTask.executionRole!);
+
+    // Frontend Service
+    this.frontendService = new ecs.FargateService(this, "frontend-service", {
+      cluster: this.cluster,
+      taskDefinition: frontendTask,
+      desiredCount: 1,
+      assignPublicIp: false,
     });
 
-    if (domainName) {
-      new CfnOutput(this, "ServiceUrl", {
-        value: `https://${domainName}`,
+    // Target Groups (crear UNA vez cada uno; IDs únicos)
+    const backendTargetGroup =
+      new elasticloadbalancingv2.ApplicationTargetGroup(this, "backend-tg", {
+        vpc,
+        port: 80,
+        protocol: elasticloadbalancingv2.ApplicationProtocol.HTTP,
+        targetType: elasticloadbalancingv2.TargetType.IP,
+        healthCheck: {
+          path: "/",
+          interval: Duration.seconds(30),
+          timeout: Duration.seconds(10),
+          healthyThresholdCount: 2,
+          unhealthyThresholdCount: 3,
+        },
+      });
+    backendTargetGroup.addTarget(this.backendService);
+
+    const frontendTargetGroup =
+      new elasticloadbalancingv2.ApplicationTargetGroup(this, "frontend-tg", {
+        vpc,
+        port: 3000,
+        protocol: elasticloadbalancingv2.ApplicationProtocol.HTTP,
+        targetType: elasticloadbalancingv2.TargetType.IP,
+        healthCheck: {
+          path: "/",
+          interval: Duration.seconds(30),
+          timeout: Duration.seconds(10),
+          healthyThresholdCount: 2,
+          unhealthyThresholdCount: 3,
+        },
+      });
+    frontendTargetGroup.addTarget(this.frontendService);
+
+    // Reglas de routing (usar el listener existente; default → frontend)
+    if (httpsListener) {
+      // default
+      httpsListener.addTargetGroups("default-frontend", {
+        targetGroups: [frontendTargetGroup],
+      });
+      // /api → backend
+      httpsListener.addTargetGroups("routes-backend", {
+        conditions: [
+          elasticloadbalancingv2.ListenerCondition.pathPatterns([
+            "/api",
+            "/api/*",
+          ]),
+        ],
+        targetGroups: [backendTargetGroup],
+        priority: 1,
+      });
+      // resto → frontend
+      httpsListener.addTargetGroups("routes-frontend", {
+        conditions: [
+          elasticloadbalancingv2.ListenerCondition.pathPatterns(["/*"]),
+        ],
+        targetGroups: [frontendTargetGroup],
+        priority: 2,
       });
     } else {
-      new CfnOutput(this, "ServiceUrl", {
-        value: `http://${this.service.loadBalancer.loadBalancerDnsName}`,
+      // Solo HTTP
+      httpListener.addTargetGroups("default-frontend", {
+        targetGroups: [frontendTargetGroup],
+      });
+      httpListener.addTargetGroups("routes-backend", {
+        conditions: [
+          elasticloadbalancingv2.ListenerCondition.pathPatterns([
+            "/api",
+            "/api/*",
+          ]),
+        ],
+        targetGroups: [backendTargetGroup],
+        priority: 1,
+      });
+      httpListener.addTargetGroups("routes-frontend", {
+        conditions: [
+          elasticloadbalancingv2.ListenerCondition.pathPatterns(["/*"]),
+        ],
+        targetGroups: [frontendTargetGroup],
+        priority: 2,
       });
     }
 
-    new CfnOutput(this, "EcrRepositoryUri", {
+    // Outputs
+    if (domainName) {
+      new CfnOutput(this, "ServiceUrl", {
+        value: `https://${domainName}`,
+        description: "URL to access the application",
+      });
+    } else {
+      new CfnOutput(this, "ServiceUrl", {
+        value: `http://${this.loadBalancer.loadBalancerDnsName}`,
+        description: "URL to access the application",
+      });
+    }
+
+    new CfnOutput(this, "BackendRepositoryUri", {
       value: this.repository.repositoryUri,
+      description: "Backend ECR repository URI",
+    });
+
+    new CfnOutput(this, "FrontendRepositoryUri", {
+      value: this.frontendRepository.repositoryUri,
+      description: "Frontend ECR repository URI",
+    });
+
+    new CfnOutput(this, "LoadBalancerDnsName", {
+      value: this.loadBalancer.loadBalancerDnsName,
+      description: "Load Balancer DNS name",
     });
   }
 }
