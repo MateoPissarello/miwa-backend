@@ -6,15 +6,18 @@ import {
   StackProps,
 } from "aws-cdk-lib";
 import * as certificatemanager from "aws-cdk-lib/aws-certificatemanager";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as elasticloadbalancingv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam"; // Importar IAM para manejar permisos directamente
+import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as route53 from "aws-cdk-lib/aws-route53";
 import * as route53_targets from "aws-cdk-lib/aws-route53-targets";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { Construct } from "constructs";
 
@@ -25,6 +28,9 @@ export interface MiwaBackendStackProps extends StackProps {
   readonly domain?: MiwaBackendDomainProps;
   readonly imageTag?: string;
   readonly frontendImageTag?: string;
+  readonly filesBucket?: s3.IBucket;
+  readonly greeterFn?: lambda.IFunction;
+  readonly api_endpoint?: string;
 }
 
 export interface MiwaBackendDomainProps {
@@ -180,6 +186,33 @@ export class MiwaBackendStack extends Stack {
       })
     );
 
+    const tokensTable = dynamodb.Table.fromTableName(
+      this,
+      "GoogleTokensTable",
+      "miwa_google_tokens"
+    );
+
+    // Permisos al rol de la tarea ECS (backend)
+    tokensTable.grantReadWriteData(backendTask.taskRole);
+    const bucketFiles = props.filesBucket;
+    if (bucketFiles) {
+      props.filesBucket.grantReadWrite(backendTask.taskRole);
+      // Si usas S3 en runtime, te puede servir pasar el nombre por env:
+      // backendContainerEnv["FILES_BUCKET"] = props.filesBucket.bucketName;
+    }
+    const greeterFn = props.greeterFn;
+    if (greeterFn) {
+      backendTask.taskRole.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          actions: ["lambda:InvokeFunction", "lambda:InvokeAsync"],
+          resources: [props.greeterFn.functionArn],
+          effect: iam.Effect.ALLOW,
+        })
+      );
+      // Si quieres, también:
+      // environment: { GREETER_FN_ARN: props.greeterFn.functionArn }
+    }
+
     // 4. Se inyectan los secretos individuales (estos son los que causan las declaraciones)
     // El CDK usará el permiso que acabamos de agregar para inyectar estos valores.
     const backendContainerSecrets: Record<string, ecs.Secret> = {};
@@ -188,8 +221,6 @@ export class MiwaBackendStack extends Stack {
       "SECRET_KEY",
       "ALGORITHM",
       "ACCESS_TOKEN_EXPIRE_MINUTES",
-      "API_GATEWAY_URL",
-      "S3_BUCKET_ARN",
       "COGNITO_USER_POOL_ID",
       "AWS_REGION",
       "COGNITO_CLIENT_ID",
@@ -303,6 +334,8 @@ export class MiwaBackendStack extends Stack {
         DB_HOST: databaseCluster.clusterEndpoint.hostname,
         DB_PORT: databaseCluster.clusterEndpoint.port.toString(),
         DB_NAME: databaseName,
+        S3_BUCKET_ARN: bucketFiles?.bucketName.toString() || "",
+        API_GATEWAY_URL: props.api_endpoint!,
       },
       secrets: backendContainerSecrets,
     });

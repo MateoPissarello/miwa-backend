@@ -31,7 +31,7 @@ kernel = create_kernel()
 app: FastAPI = kernel.app
 
 
-@app.get("api/")
+@app.get("api/health")
 def root():
     return {"message": "¡Bienvenido a la API de MIWA!"}
 

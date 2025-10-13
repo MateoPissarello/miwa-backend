@@ -2,6 +2,7 @@ import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha";
 import * as cdk from "aws-cdk-lib";
 import { Duration, RemovalPolicy } from "aws-cdk-lib";
 import * as apigw from "aws-cdk-lib/aws-apigateway";
+import * as lambda from "aws-cdk-lib/aws-lambda";
 import { Code, Function, Runtime } from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { Construct } from "constructs";
@@ -9,7 +10,10 @@ import * as path from "path";
 
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
-export class MiwaStack extends cdk.Stack {
+export class MiwaLambdaS3Stack extends cdk.Stack {
+  public readonly miwaBucket: s3.Bucket;
+  public readonly greeterFn: lambda.IFunction;
+  public readonly api_endpoint: string 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
@@ -25,7 +29,7 @@ export class MiwaStack extends cdk.Stack {
         SENDGRID_SENDER: process.env.SENDER || "",
       },
     });
-
+    this.greeterFn = lambdaFn;
     const api = new apigw.LambdaRestApi(this, "miwa-api", {
       handler: lambdaFn,
       proxy: false,
@@ -41,7 +45,10 @@ export class MiwaStack extends cdk.Stack {
     const send = api.root.addResource("send");
     send.addMethod("POST", integration); // ← ahora el API tiene un método
 
-    new cdk.CfnOutput(this, "APIEndpoint", { value: api.url! + "send" });
+    const api_endpoint = api.url! + "send"
+    new cdk.CfnOutput(this, "APIEndpoint", { value: api_endpoint });
+  
+    this.api_endpoint = api_endpoint
     // The code that defines your stack goes here
 
     // example resource
@@ -55,7 +62,7 @@ export class MiwaStack extends cdk.Stack {
       autoDeleteObjects: true, // Solo para desarrollo
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
     });
-
+    this.miwaBucket = miwaBucket;
     // Permitir a la Lambda acceso completo al bucket
     miwaBucket.grantReadWrite(lambdaFn);
 
