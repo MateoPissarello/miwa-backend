@@ -2,7 +2,10 @@ import * as cdk from "aws-cdk-lib";
 import { MiwaBackendPipelineStack } from "../lib/miwa-backend-pipeline-stack";
 import { MiwaBackendStack } from "../lib/miwa-backend-stack";
 import { MiwaFrontendPipelineStack } from "../lib/miwa-frontend-pipeline-stack";
+import { config as loadEnv } from "dotenv";
+import * as path from "path";
 
+loadEnv({ path: path.resolve(__dirname, "..", ".env") });
 const app = new cdk.App();
 
 const requireEnv = (name: string): string => {
@@ -17,7 +20,7 @@ const defaultAccount = process.env.CDK_DEFAULT_ACCOUNT;
 const defaultRegion = process.env.CDK_DEFAULT_REGION || "us-east-1";
 
 // Stack principal con ambos servicios
-const mainStack = new MiwaBackendStack(app, "MiwaMainStack", {
+const mainStack = new MiwaBackendStack(app, "MiwaBackendStack", {
   env: {
     account: defaultAccount,
     region: defaultRegion,
@@ -25,7 +28,7 @@ const mainStack = new MiwaBackendStack(app, "MiwaMainStack", {
   domain: {
     hostedZoneId: process.env.HOSTED_ZONE_ID || "Z1234567890ABC",
     zoneName: process.env.DOMAIN_NAME || "example.com",
-    certificateArn: process.env.CERTIFICATE_ARN,
+    certificateArn: process.env.CERTIFICATE_ARN, 
     subdomain: process.env.SUBDOMAIN || "app",
   },
 });
