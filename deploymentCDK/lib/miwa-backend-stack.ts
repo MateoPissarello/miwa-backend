@@ -367,11 +367,12 @@ export class MiwaBackendStack extends Stack {
         protocol: elasticloadbalancingv2.ApplicationProtocol.HTTP,
         targetType: elasticloadbalancingv2.TargetType.IP,
         healthCheck: {
-          path: "/",
+          path: "/api/health",
           interval: Duration.seconds(30),
           timeout: Duration.seconds(10),
           healthyThresholdCount: 2,
           unhealthyThresholdCount: 3,
+          healthyHttpCodes: "200",
         },
       });
     backendTargetGroup.addTarget(this.backendService);
@@ -388,6 +389,7 @@ export class MiwaBackendStack extends Stack {
           timeout: Duration.seconds(10),
           healthyThresholdCount: 2,
           unhealthyThresholdCount: 3,
+          healthyHttpCodes: "200,307",
         },
       });
     frontendTargetGroup.addTarget(this.frontendService);
