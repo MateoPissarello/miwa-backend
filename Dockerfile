@@ -1,5 +1,5 @@
 ### Use official Python image
-FROM public.ecr.aws/docker-library/python:3.12-slim
+FROM public.ecr.aws/docker/library/python:3.12-slim
 
 # Update system packages to fix vulnerabilities and install git
 RUN apt-get update && apt-get upgrade -y && apt-get clean && apt-get install -y git
