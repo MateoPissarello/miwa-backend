@@ -1,14 +1,17 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile, Query, Depends
-from typing import List
-from fastapi.responses import StreamingResponse
-from typing import Optional
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
+from typing import List, Optional
+
+from sqlalchemy.orm import Session
+
 from utils.RoleChecker import RoleChecker
 from utils.get_current_user_cognito import TokenData, get_current_user
-from .functions import S3Storage
-from sqlalchemy.orm import Session
+
 from database import get_db
-from .schemas import PresignSignupReq
+
+from .functions import S3Storage
+from .schemas import PresignSignupReq, UploadResponse
 import uuid
 import mimetypes
 from .deps import get_s3_storage
@@ -18,12 +21,17 @@ router = APIRouter(prefix="/s3", tags=["s3"])
 all_users = RoleChecker(["client", "admin"])
 
 
-@router.post("/upload", response_model=str)
+# Folder defaults to "uploads" but consumers like the transcription flow should
+# pass folder="recordings" so the assets remain grouped logically.
+@router.post("/upload", response_model=UploadResponse)
 async def upload_endpoint(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: TokenData = Depends(get_current_user),
-    folder: Optional[str] = Query(default="uploads"),
+    folder: Optional[str] = Query(
+        default="uploads",
+        description="S3 prefix where the object will be stored. Use 'recordings' for transcription uploads.",
+    ),
 ):
     s3: S3Storage = get_s3_storage()
     try:
@@ -31,14 +39,15 @@ async def upload_endpoint(
         if email is None:
             raise HTTPException(status_code=401, detail="Email claim missing in token")
         # Upload and return a presigned GET URL (private-by-default)
+        key = f"{folder}/{email}/{file.filename}"
         url = await run_in_threadpool(
             lambda: s3.upload_fileobj(
                 file.file,
-                key=f"{folder}/{email}/{file.filename}",
+                key=key,
                 content_type=file.content_type or "application/octet-stream",
             )
         )
-        return url
+        return UploadResponse(key=key, url=url)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
