@@ -26,3 +26,6 @@ class DynamoGoogleTable:
     def load_tokens(self, user_sub: str):
         r = self.table.get_item(Key={"user_sub": user_sub})
         return r.get("Item")
+
+    def delete_tokens(self, user_sub: str):
+        self.table.delete_item(Key={"user_sub": user_sub})
