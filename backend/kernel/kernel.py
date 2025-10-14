@@ -39,7 +39,7 @@ class Kernel:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-
+    
         self._capability_factories: Dict[str, CapabilityFactory] = {}
         self._capability_cache: Dict[str, Any] = {}
         self._capability_singletons: Dict[str, bool] = {}
