@@ -1,5 +1,6 @@
-from pydantic import BaseModel, EmailStr
 from typing import Optional
+
+from pydantic import BaseModel, EmailStr
 
 
 class PresignSignupReq(BaseModel):
@@ -12,3 +13,8 @@ class PresignSignupResp(BaseModel):
     put_url: str
     get_url: str
     key: str
+
+
+class UploadResponse(BaseModel):
+    key: str
+    url: str
