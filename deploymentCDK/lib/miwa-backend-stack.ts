@@ -18,6 +18,9 @@ import * as rds from "aws-cdk-lib/aws-rds";
 import * as route53 from "aws-cdk-lib/aws-route53";
 import * as route53_targets from "aws-cdk-lib/aws-route53-targets";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as s3n from "aws-cdk-lib/aws-s3-notifications";
+import * as events from "aws-cdk-lib/aws-events";
+import * as targets from "aws-cdk-lib/aws-events-targets";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { Construct } from "constructs";
 
@@ -195,10 +198,93 @@ export class MiwaBackendStack extends Stack {
     // Permisos al rol de la tarea ECS (backend)
     tokensTable.grantReadWriteData(backendTask.taskRole);
     const bucketFiles = props.filesBucket;
+    const apiBaseUrl = props.api_endpoint ?? "";
+    let transcriptionDispatcherFn: lambda.Function | undefined;
+    let transcriptionCompleterFn: lambda.Function | undefined;
     if (bucketFiles) {
       props.filesBucket.grantReadWrite(backendTask.taskRole);
-      // Si usas S3 en runtime, te puede servir pasar el nombre por env:
-      // backendContainerEnv["FILES_BUCKET"] = props.filesBucket.bucketName;
+      const lambdaCode = lambda.Code.fromAsset("deploymentCDK/lambda");
+      transcriptionDispatcherFn = new lambda.Function(
+        this,
+        "transcription-dispatcher",
+        {
+          runtime: lambda.Runtime.PYTHON_3_11,
+          handler: "transcription_dispatcher.lambda_handler",
+          code: lambdaCode,
+          timeout: Duration.minutes(5),
+          memorySize: 512,
+          environment: {
+            CONFIG_SECRET_ARN: mySecrets.secretArn,
+            API_BASE_URL: apiBaseUrl,
+            RAW_TRANSCRIPTS_PREFIX: "transcripts/raw/",
+            WEBHOOK_HEADER: "X-Webhook-Token",
+            WEBHOOK_TOKEN_KEY: "TRANSCRIPTION_WEBHOOK_TOKEN",
+            AWS_REGION: Stack.of(this).region,
+            BUCKET_NAME: bucketFiles.bucketName,
+          },
+        }
+      );
+      mySecrets.grantRead(transcriptionDispatcherFn);
+      bucketFiles.grantReadWrite(transcriptionDispatcherFn);
+      transcriptionDispatcherFn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["transcribe:StartTranscriptionJob"],
+          resources: ["*"],
+        })
+      );
+      transcriptionDispatcherFn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+          resources: [mySecrets.secretArn],
+        })
+      );
+      bucketFiles.addEventNotification(
+        s3.EventType.OBJECT_CREATED,
+        new s3n.LambdaDestination(transcriptionDispatcherFn),
+        { prefix: "recordings/" }
+      );
+
+      transcriptionCompleterFn = new lambda.Function(this, "transcription-completer", {
+        runtime: lambda.Runtime.PYTHON_3_11,
+        handler: "transcription_completer.lambda_handler",
+        code: lambdaCode,
+        timeout: Duration.minutes(5),
+        memorySize: 512,
+        environment: {
+          CONFIG_SECRET_ARN: mySecrets.secretArn,
+          API_BASE_URL: apiBaseUrl,
+          RAW_TRANSCRIPTS_PREFIX: "transcripts/raw/",
+          TEXT_TRANSCRIPTS_PREFIX: "transcripts/text/",
+          SUMMARIES_PREFIX: "summaries/",
+          WEBHOOK_HEADER: "X-Webhook-Token",
+          WEBHOOK_TOKEN_KEY: "TRANSCRIPTION_WEBHOOK_TOKEN",
+          AWS_REGION: Stack.of(this).region,
+          BUCKET_NAME: bucketFiles.bucketName,
+        },
+      });
+      mySecrets.grantRead(transcriptionCompleterFn);
+      bucketFiles.grantReadWrite(transcriptionCompleterFn);
+      transcriptionCompleterFn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["bedrock:InvokeModel"],
+          resources: ["*"],
+        })
+      );
+      transcriptionCompleterFn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+          resources: [mySecrets.secretArn],
+        })
+      );
+
+      const completionRule = new events.Rule(this, "transcribe-job-completed-rule", {
+        eventPattern: {
+          source: ["aws.transcribe"],
+          detailType: ["Transcribe Job State Change"],
+          detail: { TranscriptionJobStatus: ["COMPLETED"] },
+        },
+      });
+      completionRule.addTarget(new targets.LambdaFunction(transcriptionCompleterFn));
     }
     const greeterFn = props.greeterFn;
     if (greeterFn) {
@@ -231,6 +317,13 @@ export class MiwaBackendStack extends Stack {
       "GOOGLE_AFTER_CONNECT",
       "DYNAMO_GOOGLE_TOKENS_TABLE",
       "GOOGLE_STATE_SECRET",
+      "TRANSCRIBE_ROLE_ARN",
+      "TRANSCRIPTS_PREFIX",
+      "SUMMARIES_PREFIX",
+      "LLM_MODEL_ID",
+      "SUMMARY_PROMPT_TEMPLATE",
+      "TRANSCRIPTION_WEBHOOK_TOKEN",
+      "S3_KMS_KEY_ARN",
     ];
 
     for (const key of secretKeys) {

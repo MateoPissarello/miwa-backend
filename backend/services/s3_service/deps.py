@@ -42,7 +42,12 @@ def register_s3_dependency(kernel: Kernel) -> None:
     def _factory(k: Kernel) -> S3Storage:
         settings = k.settings
         bucket_name = _normalize_bucket_name(settings.S3_BUCKET_ARN)
-        return S3Storage(bucket=bucket_name, region=settings.AWS_REGION)
+        kms_key = settings.S3_KMS_KEY_ARN or None
+        return S3Storage(
+            bucket=bucket_name,
+            region=settings.AWS_REGION,
+            kms_key_id=kms_key if kms_key else None,
+        )
 
     kernel.register_capability(CAPABILITY_NAME, _factory)
 

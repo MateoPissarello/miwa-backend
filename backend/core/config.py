@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     DB_HOST: str
     DB_PORT: str
     DB_NAME: str
+    TRANSCRIBE_ROLE_ARN: str
+    TRANSCRIPTS_PREFIX: str
+    SUMMARIES_PREFIX: str
+    LLM_MODEL_ID: str
+    SUMMARY_PROMPT_TEMPLATE: str
+    TRANSCRIPTION_WEBHOOK_TOKEN: str
+    S3_KMS_KEY_ARN: str | None = None
 
     class Config:
         env_file = ".env"

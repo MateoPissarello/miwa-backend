@@ -1,4 +1,15 @@
+import os
+
+os.environ.setdefault("TRANSCRIBE_ROLE_ARN", "test-role")
+os.environ.setdefault("TRANSCRIPTS_PREFIX", "transcripts/raw/")
+os.environ.setdefault("SUMMARIES_PREFIX", "summaries/")
+os.environ.setdefault("LLM_MODEL_ID", "test-model")
+os.environ.setdefault("SUMMARY_PROMPT_TEMPLATE", "Summarize: {transcript}")
+os.environ.setdefault("TRANSCRIPTION_WEBHOOK_TOKEN", "test-token")
+
 import pytest
+
+pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 from main import app
 
