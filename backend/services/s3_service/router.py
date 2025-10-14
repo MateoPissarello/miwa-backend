@@ -27,7 +27,7 @@ async def upload_endpoint(
 ):
     s3: S3Storage = get_s3_storage()
     try:
-        email = current_user.email
+        email = current_user.username
         if email is None:
             raise HTTPException(status_code=401, detail="Email claim missing in token")
         # Upload and return a presigned GET URL (private-by-default)
@@ -51,7 +51,7 @@ async def list_endpoint(
 ):
     s3: S3Storage = get_s3_storage()
     try:
-        email = current_user.email
+        email = current_user.username
         if email is None:
             raise HTTPException(status_code=401, detail="Email claim missing in token")
         prefix = f"{folder}/{email}/"
