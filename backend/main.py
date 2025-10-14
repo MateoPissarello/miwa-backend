@@ -10,6 +10,7 @@ from kernel import Kernel
 from services.auth_service.plugin import AuthPlugin
 from services.calendar_service.plugin import CalendarPlugin
 from services.s3_service.plugin import S3Plugin
+from services.transcription_service.plugin import TranscriptionPlugin
 
 
 def _env_flag(value: str | None) -> bool:
@@ -22,6 +23,7 @@ def create_kernel() -> Kernel:
     debug = _env_flag(os.getenv("DEBUG"))
     kernel = Kernel(debug=debug)
     kernel.register_plugin(S3Plugin())
+    kernel.register_plugin(TranscriptionPlugin())
     kernel.register_plugin(AuthPlugin())
     kernel.register_plugin(CalendarPlugin())
     return kernel
