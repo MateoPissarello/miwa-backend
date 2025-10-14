@@ -1,12 +1,15 @@
 # deps/cognito_auth.py
 import time
-import requests
 from functools import lru_cache
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
+import boto3
+import requests
+from botocore.exceptions import ClientError
 from core.config import settings
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, jwk
+from jose import jwk, jwt
 from jose.utils import base64url_decode
 from pydantic import BaseModel
 
@@ -30,6 +33,11 @@ def _get_jwks() -> Dict[str, Any]:
     resp = requests.get(settings.COGNITO_JWKS_URL, timeout=5)
     resp.raise_for_status()
     return resp.json()
+
+
+@lru_cache(maxsize=1)
+def _get_cognito_client():
+    return boto3.client("cognito-idp", region_name=settings.AWS_REGION)
 
 
 def _find_key(kid: str) -> Optional[Dict[str, str]]:
@@ -102,11 +110,37 @@ def _validate_claims(claims: Dict[str, Any], expected_use: str = "access") -> To
     )
 
 
+def _enrich_from_cognito(data: TokenData, access_token: str) -> TokenData:
+    needs_email = data.email is None
+    username_is_sub = data.username in (None, data.sub)
+
+    if not needs_email and not username_is_sub:
+        return data
+
+    client = _get_cognito_client()
+    try:
+        response = client.get_user(AccessToken=access_token)
+    except ClientError as exc:
+        error_code = exc.response["Error"].get("Code")
+        if error_code in {"NotAuthorizedException", "InvalidParameterException"}:
+            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+        raise HTTPException(status_code=500, detail="Unable to retrieve user information from Cognito")
+
+    attributes = {item["Name"]: item["Value"] for item in response.get("UserAttributes", [])}
+    email = attributes.get("email")
+    username = email or response.get("Username")
+
+    return data.copy(update={
+        "email": email if needs_email else data.email,
+        "username": username if username_is_sub else data.username,
+    })
+
+
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenData:
     try:
         claims = _verify_signature_and_get_claims(token)
         data = _validate_claims(claims, expected_use="access")  # tu API debe recibir ACCESS TOKENS
-        return data
+        return _enrich_from_cognito(data, token)
     except HTTPException:
         raise
     except Exception:
