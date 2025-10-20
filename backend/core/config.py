@@ -32,9 +32,10 @@ class Settings(BaseSettings):
     DDB_TABLE_NAME: str = "meeting_artifacts"
     DEFAULT_URL_TTL_SEC: int = 3600
     TRANSCRIBE_LANG_HINT: str | None = None
-    LLM_MODEL_ID: str | None = None
+    LLM_MODEL_ID: str = "amazon.titan-text-lite-v1"
     LLM_MAX_TOKENS: int = 4096
     ALLOW_EXTS: str = ".mp3,.mp4,.m4a,.wav"
+    PIPELINE_STATE_MACHINE_ARN: str | None = None
 
     class Config:
         env_file = ".env"

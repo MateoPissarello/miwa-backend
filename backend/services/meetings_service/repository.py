@@ -131,6 +131,27 @@ class MeetingArtifactRepository:
             raise RuntimeError("Meeting artefact missing after summary update")
         return item
 
+    def update_status(
+        self,
+        identifier: MeetingIdentifier,
+        *,
+        status: MeetingArtifactStatus,
+    ) -> MeetingArtifact:
+        table = self._get_table()
+        now = _utcnow()
+        table.update_item(
+            Key={"pk": self._pk(identifier)},
+            UpdateExpression="SET status=:status, updated_at=:updated",
+            ExpressionAttributeValues={
+                ":status": status.value,
+                ":updated": now,
+            },
+        )
+        item = self.get(identifier)
+        if item is None:  # pragma: no cover
+            raise RuntimeError("Meeting artefact missing after status update")
+        return item
+
     def mark_failed(
         self,
         identifier: MeetingIdentifier,

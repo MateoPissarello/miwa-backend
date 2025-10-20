@@ -5,6 +5,7 @@ import { MiwaBackendPipelineStack } from "../lib/miwa-backend-pipeline-stack";
 import { MiwaBackendStack } from "../lib/miwa-backend-stack";
 import { MiwaFrontendPipelineStack } from "../lib/miwa-frontend-pipeline-stack";
 import { MiwaLambdaS3Stack } from "../lib/miwa_lambda_stack";
+import { MiwaMeetingsPipelineStack } from "../lib/miwa-meetings-pipeline-stack";
 
 loadEnv({ path: path.resolve(__dirname, "..", ".env") });
 const app = new cdk.App();
@@ -29,6 +30,13 @@ const lambda_and_s3 = new MiwaLambdaS3Stack(app, "MiwaLambdaS3Stack", {
   },
 });
 
+const meetingsInfra = new MiwaMeetingsPipelineStack(app, "MiwaMeetingsPipelineStack", {
+  env: {
+    account: defaultAccount,
+    region: defaultRegion,
+  },
+});
+
 // Stack principal con ambos servicios
 const mainStack = new MiwaBackendStack(app, "MiwaBackendStack", {
   env: {
@@ -41,12 +49,15 @@ const mainStack = new MiwaBackendStack(app, "MiwaBackendStack", {
     certificateArn: process.env.CERTIFICATE_ARN,
     subdomain: process.env.SUBDOMAIN || "app",
   },
-  filesBucket: lambda_and_s3.miwaBucket,
+  filesBucket: meetingsInfra.recordingsBucket,
   greeterFn: lambda_and_s3.greeterFn,
   api_endpoint: lambda_and_s3.api_endpoint,
+  meetingTable: meetingsInfra.meetingTable,
+  meetingsStateMachineArn: meetingsInfra.stateMachine.stateMachineArn,
 });
 
 mainStack.addDependency(lambda_and_s3);
+mainStack.addDependency(meetingsInfra);
 
 const githubConnectionArn = requireEnv("GITHUB_CONNECTION_ARN");
 const backendRepoOwner = requireEnv("BACKEND_REPO_OWNER");

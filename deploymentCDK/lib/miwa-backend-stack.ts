@@ -31,6 +31,8 @@ export interface MiwaBackendStackProps extends StackProps {
   readonly filesBucket?: s3.IBucket;
   readonly greeterFn?: lambda.IFunction;
   readonly api_endpoint?: string;
+  readonly meetingTable?: dynamodb.ITable;
+  readonly meetingsStateMachineArn?: string;
 }
 
 export interface MiwaBackendDomainProps {
@@ -194,6 +196,9 @@ export class MiwaBackendStack extends Stack {
 
     // Permisos al rol de la tarea ECS (backend)
     tokensTable.grantReadWriteData(backendTask.taskRole);
+    if (props.meetingTable) {
+      props.meetingTable.grantReadWriteData(backendTask.taskRole);
+    }
     const bucketFiles = props.filesBucket;
     if (bucketFiles) {
       props.filesBucket.grantReadWrite(backendTask.taskRole);
@@ -335,7 +340,14 @@ export class MiwaBackendStack extends Stack {
         DB_PORT: databaseCluster.clusterEndpoint.port.toString(),
         DB_NAME: databaseName,
         S3_BUCKET_ARN: bucketFiles?.bucketName.toString() || "",
+        BUCKET_NAME: bucketFiles?.bucketName.toString() || "",
         API_GATEWAY_URL: props.api_endpoint!,
+        DDB_TABLE_NAME: props.meetingTable?.tableName ?? "meeting_artifacts",
+        PIPELINE_STATE_MACHINE_ARN: props.meetingsStateMachineArn ?? "",
+        LLM_MODEL_ID: "amazon.titan-text-lite-v1",
+        LLM_MAX_TOKENS: "4096",
+        DEFAULT_URL_TTL_SEC: "3600",
+        ALLOW_EXTS: ".mp3,.mp4,.m4a,.wav",
       },
       secrets: backendContainerSecrets,
     });

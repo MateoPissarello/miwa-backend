@@ -37,6 +37,10 @@ class MeetingS3Paths:
     def summary_key(self) -> str:
         return f"resumenes/{self.identifier.user_email}/{self.folder}/{self.identifier.basename}.json"
 
+    @property
+    def transcription_output_prefix(self) -> str:
+        return f"transcripciones/raw/{self.identifier.user_email}/{self.folder}/"
+
     @classmethod
     def parse_from_recording_key(cls, key: str) -> "MeetingS3Paths":
         decoded = unquote_plus(key)
