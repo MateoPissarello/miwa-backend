@@ -111,8 +111,34 @@ def _error(status_code: int, code: str, message: str, details: Optional[dict] = 
     )
 
 
+def _normalize_identifier(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized.lower()
+
+
+def _has_admin_scope(user: TokenData) -> bool:
+    if not user.scope:
+        return False
+    scopes = {scope.strip() for scope in user.scope.split() if scope.strip()}
+    return "aws.cognito.signin.user.admin" in scopes
+
+
 def _ensure_authorized(user: TokenData, user_email: str) -> None:
-    if user.username != user_email:
+    if _has_admin_scope(user):
+        return
+
+    candidate = _normalize_identifier(user_email)
+    allowed = {
+        _normalize_identifier(user.username),
+        _normalize_identifier(user.email),
+        _normalize_identifier(user.sub),
+    }
+    allowed.discard(None)
+    if candidate not in allowed:
         raise _error(403, "INVALID_INPUT", "user_email does not match authenticated user")
 
 
