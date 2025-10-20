@@ -34,7 +34,11 @@ class MeetingArtifactRepository:
     def _get_table(self):  # pragma: no cover - thin wrapper
         import boto3
 
-        resource = boto3.resource("dynamodb", region_name=self._client.meta.region_name)
+        kwargs = {"region_name": self._client.meta.region_name}
+        endpoint_url = getattr(self._client.meta, "endpoint_url", None)
+        if endpoint_url:
+            kwargs["endpoint_url"] = endpoint_url
+        resource = boto3.resource("dynamodb", **kwargs)
         return resource.Table(self._table_name)
 
     # ------------------------------------------------------------------
