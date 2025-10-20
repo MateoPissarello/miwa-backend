@@ -153,6 +153,32 @@ def _ensure_authorized(user: TokenData, user_email: str) -> None:
         raise _error(403, "INVALID_INPUT", "user_email does not match authenticated user")
 
 
+def _resolve_user_email(requested: Optional[str], user: TokenData) -> str:
+    if requested:
+        normalized_requested = _normalize_identifier(requested)
+        if "@" in requested:
+            resolved = requested.strip()
+        elif normalized_requested in {
+            _normalize_identifier(user.email),
+            _normalize_identifier(user.username),
+            _normalize_identifier(user.sub),
+        } and user.email:
+            resolved = user.email
+        else:
+            resolved = requested.strip()
+    elif user.email:
+        resolved = user.email
+    elif user.username:
+        resolved = user.username
+    elif user.sub:
+        resolved = user.sub
+    else:  # pragma: no cover - defensive guard
+        raise _error(400, "INVALID_INPUT", "Unable to determine user email")
+
+    _ensure_authorized(user, resolved)
+    return resolved
+
+
 def _build_list_item(
     artefact: MeetingArtifact,
     s3: S3Storage,
@@ -216,9 +242,7 @@ def list_meetings(
     repository: MeetingArtifactRepository = Depends(get_repository),
     s3: S3Storage = Depends(get_s3_storage),
 ) -> MeetingListResponse:
-    if user_email is None:
-        user_email = current_user.username
-    _ensure_authorized(current_user, user_email)
+    user_email = _resolve_user_email(user_email, current_user)
     artefacts, total = repository.list_meetings(
         user_email=user_email,
         meeting_name=meeting_name,
@@ -239,8 +263,7 @@ def create_upload_url(
     repository: MeetingArtifactRepository = Depends(get_repository),
     s3: S3Storage = Depends(get_s3_storage),
 ) -> UploadUrlResponse:
-    user_email = payload.user_email or current_user.username
-    _ensure_authorized(current_user, user_email)
+    user_email = _resolve_user_email(payload.user_email, current_user)
     try:
         basename, ext = split_filename(payload.filename)
     except ValueError as exc:  # pragma: no cover - validation re-raised as HTTP error
@@ -304,8 +327,7 @@ async def upload_recording(
         )
     except ValidationError as exc:  # pragma: no cover - validated input re-raised as HTTP error
         raise _error(400, "INVALID_INPUT", str(exc))
-    user_email = payload.user_email or current_user.username
-    _ensure_authorized(current_user, user_email)
+    user_email = _resolve_user_email(payload.user_email, current_user)
     try:
         basename, ext = split_filename(file.filename)
     except ValueError as exc:
