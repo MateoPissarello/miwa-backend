@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field, field_validator
 
 from core.config import settings
 from services.s3_service.deps import get_s3_storage
@@ -14,7 +15,7 @@ from services.s3_service.functions import S3Storage
 from utils.get_current_user_cognito import TokenData, get_current_user
 
 from .deps import get_repository
-from .paths import MeetingS3Paths
+from .paths import MeetingS3Paths, split_filename
 from .repository import MeetingArtifactRepository
 from .schemas import MeetingArtifact, MeetingArtifactStatus, MeetingIdentifier
 
@@ -40,6 +41,67 @@ class MeetingListResponse(BaseModel):
     page: int
     page_size: int
     total: int
+
+
+class CreateUploadUrlRequest(BaseModel):
+    meeting_name: str = Field(..., description="Nombre lógico de la reunión")
+    meeting_date: str = Field(..., description="Fecha de la reunión en formato YYYY-MM-DD")
+    filename: str = Field(..., description="Nombre del archivo incluyendo extensión")
+    user_email: Optional[str] = Field(None, description="Email del dueño de la grabación")
+    expires_sec: Optional[int] = Field(
+        None,
+        ge=60,
+        le=604800,
+        description="Tiempo de expiración del presigned URL en segundos",
+    )
+    content_type: Optional[str] = Field(None, description="Content-Type esperado para el upload")
+
+    @field_validator("meeting_name")
+    @classmethod
+    def _validate_meeting_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("meeting_name cannot be empty")
+        if any(sep in cleaned for sep in ("/", "\\")):
+            raise ValueError("meeting_name cannot contain path separators")
+        return cleaned
+
+    @field_validator("meeting_date")
+    @classmethod
+    def _validate_meeting_date(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", cleaned):
+            raise ValueError("meeting_date must follow YYYY-MM-DD format")
+        return cleaned
+
+    @field_validator("filename")
+    @classmethod
+    def _validate_filename(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("filename cannot be empty")
+        return cleaned
+
+    @field_validator("user_email", mode="before")
+    @classmethod
+    def _validate_user_email(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = str(value).strip()
+        if not cleaned:
+            return None
+        return cleaned
+
+
+class UploadUrlResponse(BaseModel):
+    upload_url: str
+    expires_sec: int
+    recording_key: str
+    status: MeetingArtifactStatus
+    user_email: str
+    meeting_name: str
+    meeting_date: str
+    basename: str
 
 
 def _error(status_code: int, code: str, message: str, details: Optional[dict] = None) -> HTTPException:
@@ -99,6 +161,10 @@ def _build_list_item(
     )
 
 
+def _allowed_extensions() -> set[str]:
+    return {ext.strip().lower() for ext in settings.ALLOW_EXTS.split(",") if ext.strip()}
+
+
 @router.get("/meetings", response_model=MeetingListResponse)
 def list_meetings(
     *,
@@ -127,6 +193,57 @@ def list_meetings(
     )
     items = [_build_list_item(artefact, s3) for artefact in artefacts]
     return MeetingListResponse(items=items, page=page, page_size=page_size, total=total)
+
+
+@router.post("/meetings/upload-url", response_model=UploadUrlResponse, status_code=status.HTTP_201_CREATED)
+def create_upload_url(
+    payload: CreateUploadUrlRequest,
+    current_user: TokenData = Depends(get_current_user),
+    repository: MeetingArtifactRepository = Depends(get_repository),
+    s3: S3Storage = Depends(get_s3_storage),
+) -> UploadUrlResponse:
+    user_email = payload.user_email or current_user.username
+    _ensure_authorized(current_user, user_email)
+    try:
+        basename, ext = split_filename(payload.filename)
+    except ValueError as exc:  # pragma: no cover - validation re-raised as HTTP error
+        raise _error(400, "INVALID_INPUT", str(exc))
+    ext = ext.lower()
+    allowed_exts = _allowed_extensions()
+    if allowed_exts and ext not in allowed_exts:
+        raise _error(400, "INVALID_INPUT", f"Extension '{ext}' is not allowed")
+    identifier = MeetingIdentifier(
+        user_email=user_email,
+        meeting_name=payload.meeting_name,
+        meeting_date=payload.meeting_date,
+        basename=basename,
+    )
+    paths = MeetingS3Paths(identifier=identifier, ext=ext)
+    artefact = repository.upsert_recording(
+        identifier,
+        ext=ext,
+        s3_key_recording=paths.recording_key,
+        status=MeetingArtifactStatus.UPLOADED,
+    )
+    ttl = payload.expires_sec or settings.DEFAULT_URL_TTL_SEC
+    try:
+        upload_url = s3.presign_put_url(
+            paths.recording_key,
+            expires_seconds=ttl,
+            content_type=payload.content_type,
+        )
+    except Exception as exc:  # pragma: no cover - propagate as HTTP error
+        raise _error(500, "FAILED", f"Could not create presigned upload URL: {exc}")
+    return UploadUrlResponse(
+        upload_url=upload_url,
+        expires_sec=ttl,
+        recording_key=paths.recording_key,
+        status=artefact.status,
+        user_email=artefact.identifier.user_email,
+        meeting_name=artefact.identifier.meeting_name,
+        meeting_date=artefact.identifier.meeting_date,
+        basename=artefact.identifier.basename,
+    )
 
 
 def _fetch_artifact_or_error(

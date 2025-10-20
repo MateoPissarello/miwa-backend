@@ -11,7 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from services.meetings_service.paths import MeetingS3Paths
+from services.meetings_service.paths import MeetingS3Paths, split_filename
 from services.meetings_service.schemas import (
     MeetingIdentifier,
     SummaryPayloadValidationError,
@@ -30,6 +30,21 @@ def test_parse_recording_key_roundtrip():
     parsed = MeetingS3Paths.parse_from_recording_key(paths.recording_key)
     assert parsed.identifier == identifier
     assert parsed.ext == ".mp4"
+
+
+def test_split_filename_valid():
+    basename, ext = split_filename("grabacion.MP4")
+    assert basename == "grabacion"
+    assert ext == ".MP4"
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["", "../escape.mp3", "sin_ext", ".hidden", "video", ".."],
+)
+def test_split_filename_invalid(filename):
+    with pytest.raises(ValueError):
+        split_filename(filename)
 
 
 def test_validate_summary_payload_success():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Tuple
@@ -58,4 +59,25 @@ class MeetingS3Paths:
 def build_all_s3_keys(identifier: MeetingIdentifier, ext: str) -> Tuple[str, str, str]:
     paths = MeetingS3Paths(identifier=identifier, ext=ext)
     return paths.recording_key, paths.transcription_key, paths.summary_key
+
+
+def split_filename(filename: str) -> Tuple[str, str]:
+    """Split a filename into basename and extension enforcing security rules."""
+
+    candidate = filename.strip()
+    if not candidate:
+        raise ValueError("Filename cannot be empty")
+    if any(sep in candidate for sep in ("/", "\\")):
+        raise ValueError("Filename must not contain path separators")
+    if candidate.startswith("."):
+        raise ValueError("Filename must not start with a dot")
+    basename, ext = os.path.splitext(candidate)
+    if not basename or not ext:
+        raise ValueError("Filename must include a basename and extension")
+    if basename in {".", ".."}:
+        raise ValueError("Filename basename is invalid")
+    return basename, ext
+
+
+__all__ = ["MeetingS3Paths", "build_all_s3_keys", "split_filename"]
 
