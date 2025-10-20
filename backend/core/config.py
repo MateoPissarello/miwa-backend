@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     AWS_REGION: str
     COGNITO_SECRET: str
     S3_BUCKET_ARN: str
+    BUCKET_NAME: str | None = None
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str
@@ -28,6 +29,12 @@ class Settings(BaseSettings):
     DB_HOST: str
     DB_PORT: str
     DB_NAME: str
+    DDB_TABLE_NAME: str = "meeting_artifacts"
+    DEFAULT_URL_TTL_SEC: int = 3600
+    TRANSCRIBE_LANG_HINT: str | None = None
+    LLM_MODEL_ID: str | None = None
+    LLM_MAX_TOKENS: int = 4096
+    ALLOW_EXTS: str = ".mp3,.mp4,.m4a,.wav"
 
     class Config:
         env_file = ".env"
@@ -46,6 +53,24 @@ class Settings(BaseSettings):
         """Build the SQLAlchemy database URL from the configured credentials."""
 
         return f"postgresql+psycopg2://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+
+    @property
+    def RECORDINGS_BUCKET_NAME(self) -> str:
+        """Return the canonical bucket name used for meeting artefacts."""
+
+        if self.BUCKET_NAME:
+            return self.BUCKET_NAME
+        bucket = self.S3_BUCKET_ARN
+        if bucket.startswith("arn:"):
+            if ":::" in bucket:
+                bucket = bucket.split(":::")[-1]
+            else:
+                bucket = bucket.rsplit(":", 1)[-1]
+        if bucket.startswith("s3://"):
+            bucket = bucket[5:]
+        if "/" in bucket:
+            bucket = bucket.split("/", 1)[0]
+        return bucket
 
 
 _settings: Optional[Settings] = None
