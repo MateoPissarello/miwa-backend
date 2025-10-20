@@ -6,8 +6,9 @@ import json
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
+from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field, field_validator, ValidationError
 
 from core.config import settings
 from services.s3_service.deps import get_s3_storage
@@ -102,6 +103,16 @@ class UploadUrlResponse(BaseModel):
     meeting_name: str
     meeting_date: str
     basename: str
+
+
+class UploadRecordingResponse(BaseModel):
+    recording_key: str
+    status: MeetingArtifactStatus
+    user_email: str
+    meeting_name: str
+    meeting_date: str
+    basename: str
+    download_url: str
 
 
 def _error(status_code: int, code: str, message: str, details: Optional[dict] = None) -> HTTPException:
@@ -269,6 +280,72 @@ def create_upload_url(
         meeting_name=artefact.identifier.meeting_name,
         meeting_date=artefact.identifier.meeting_date,
         basename=artefact.identifier.basename,
+    )
+
+
+@router.post("/meetings/upload", response_model=UploadRecordingResponse, status_code=status.HTTP_201_CREATED)
+async def upload_recording(
+    meeting_name: str = Form(..., description="Nombre lógico de la reunión"),
+    meeting_date: str = Form(..., description="Fecha de la reunión en formato YYYY-MM-DD"),
+    file: UploadFile = File(...),
+    user_email: Optional[str] = Form(None, description="Email del dueño de la grabación"),
+    content_type: Optional[str] = Form(None, description="Content-Type esperado para el upload"),
+    current_user: TokenData = Depends(get_current_user),
+    repository: MeetingArtifactRepository = Depends(get_repository),
+    s3: S3Storage = Depends(get_s3_storage),
+) -> UploadRecordingResponse:
+    try:
+        payload = CreateUploadUrlRequest(
+            meeting_name=meeting_name,
+            meeting_date=meeting_date,
+            filename=file.filename,
+            user_email=user_email,
+            content_type=content_type,
+        )
+    except ValidationError as exc:  # pragma: no cover - validated input re-raised as HTTP error
+        raise _error(400, "INVALID_INPUT", str(exc))
+    user_email = payload.user_email or current_user.username
+    _ensure_authorized(current_user, user_email)
+    try:
+        basename, ext = split_filename(file.filename)
+    except ValueError as exc:
+        raise _error(400, "INVALID_INPUT", str(exc))
+    ext = ext.lower()
+    allowed_exts = _allowed_extensions()
+    if allowed_exts and ext not in allowed_exts:
+        raise _error(400, "INVALID_INPUT", f"Extension '{ext}' is not allowed")
+    identifier = MeetingIdentifier(
+        user_email=user_email,
+        meeting_name=payload.meeting_name,
+        meeting_date=payload.meeting_date,
+        basename=basename,
+    )
+    paths = MeetingS3Paths(identifier=identifier, ext=ext)
+    await file.seek(0)
+    try:
+        download_url = await run_in_threadpool(
+            lambda: s3.upload_fileobj(
+                file.file,
+                key=paths.recording_key,
+                content_type=file.content_type or payload.content_type or "application/octet-stream",
+            )
+        )
+    except Exception as exc:
+        raise _error(500, "FAILED", f"Could not upload recording: {exc}")
+    artefact = repository.upsert_recording(
+        identifier,
+        ext=ext,
+        s3_key_recording=paths.recording_key,
+        status=MeetingArtifactStatus.UPLOADED,
+    )
+    return UploadRecordingResponse(
+        recording_key=paths.recording_key,
+        status=artefact.status,
+        user_email=artefact.identifier.user_email,
+        meeting_name=artefact.identifier.meeting_name,
+        meeting_date=artefact.identifier.meeting_date,
+        basename=artefact.identifier.basename,
+        download_url=download_url,
     )
 
 
