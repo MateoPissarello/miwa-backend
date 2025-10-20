@@ -106,6 +106,23 @@ class S3Storage:
                     return keys
         return keys
 
+    # -------- Object Metadata --------
+    def get_object_metadata(self, key: str) -> dict:
+        """Get metadata for an S3 object (size, last modified, content type, etc.)."""
+        try:
+            response = self.client.head_object(Bucket=self.bucket, Key=key)
+            return {
+                'ContentLength': response.get('ContentLength', 0),
+                'ContentType': response.get('ContentType', 'application/octet-stream'),
+                'LastModified': response.get('LastModified'),
+                'ETag': response.get('ETag', '').strip('"'),
+                'Metadata': response.get('Metadata', {}),
+            }
+        except ClientError as e:
+            if e.response["Error"]["Code"] in {"NoSuchKey", "404"}:
+                raise FileNotFoundError(key) from e
+            raise
+
     # -------- Deletes --------
     def delete_key(self, key: str) -> bool:
         try:
