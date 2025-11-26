@@ -8,7 +8,6 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import Settings, get_settings, set_settings
-from database import configure_database, get_db, get_session_factory
 
 from .plugin import ServicePlugin
 from .runtime import set_kernel
@@ -98,16 +97,8 @@ class Kernel:
     def _bootstrap_infrastructure(self) -> None:
         """Initialise shared infrastructure managed by the kernel."""
 
-        configure_database(self.settings, echo=self.debug)
         # Expose frequently used capabilities
         self.register_capability("settings", lambda _: self.settings)
-        self.register_capability("db_session_factory", lambda _: get_session_factory())
-
-    @property
-    def get_db_dependency(self) -> Callable[..., Any]:
-        """Expose the shared database dependency for FastAPI routers."""
-
-        return get_db
 
 
 __all__ = ["Kernel"]

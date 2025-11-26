@@ -6,8 +6,6 @@ from fastapi.concurrency import run_in_threadpool
 from utils.RoleChecker import RoleChecker
 from utils.get_current_user_cognito import TokenData, get_current_user
 from .functions import S3Storage
-from sqlalchemy.orm import Session
-from database import get_db
 from .schemas import PresignSignupReq
 import uuid
 import mimetypes
@@ -21,7 +19,6 @@ all_users = RoleChecker(["client", "admin"])
 @router.post("/upload", response_model=str)
 async def upload_endpoint(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
     current_user: TokenData = Depends(get_current_user),
     folder: Optional[str] = Query(default="uploads"),
 ):

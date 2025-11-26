@@ -14,7 +14,6 @@ import * as elasticloadbalancingv2 from "aws-cdk-lib/aws-elasticloadbalancingv2"
 import * as iam from "aws-cdk-lib/aws-iam"; // Importar IAM para manejar permisos directamente
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as logs from "aws-cdk-lib/aws-logs";
-import * as rds from "aws-cdk-lib/aws-rds";
 import * as route53 from "aws-cdk-lib/aws-route53";
 import * as route53_targets from "aws-cdk-lib/aws-route53-targets";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -72,32 +71,6 @@ export class MiwaBackendStack extends Stack {
       logGroupName: `/aws/ecs/miwa-frontend`,
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
-    });
-
-    const databaseName = "miwa_backend";
-
-    const databaseSecurityGroup = new ec2.SecurityGroup(this, "MiwaDbSg", {
-      vpc,
-      description: "SG for MIWA Aurora Serverless v2",
-      allowAllOutbound: true,
-    });
-
-    // Aurora Serverless v2
-    const databaseCluster = new rds.DatabaseCluster(this, "MiwaDatabase", {
-      engine: rds.DatabaseClusterEngine.auroraPostgres({
-        version: rds.AuroraPostgresEngineVersion.VER_15_3,
-      }),
-      credentials: rds.Credentials.fromGeneratedSecret("postgres"),
-      defaultDatabaseName: databaseName,
-      writer: rds.ClusterInstance.serverlessV2("writer"),
-      vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      securityGroups: [databaseSecurityGroup],
-      serverlessV2MinCapacity: 0.5,
-      serverlessV2MaxCapacity: 8,
-      backup: { retention: Duration.days(1) },
-      removalPolicy: RemovalPolicy.DESTROY,
-      copyTagsToSnapshot: true,
     });
 
     // Backend Repository
@@ -170,7 +143,7 @@ export class MiwaBackendStack extends Stack {
     const mySecrets = Secret.fromSecretCompleteArn(
       this,
       `miwa-MySecret`,
-      "arn:aws:secretsmanager:us-east-1:225989373192:secret:dev/miwa/app-qcbDUm"
+      "arn:aws:secretsmanager:us-east-1:956189607462:secret:dev/miwa/app-VczjCH"
     );
 
     // 3. Crear una única declaración de política para leer el secreto principal
@@ -241,28 +214,6 @@ export class MiwaBackendStack extends Stack {
       );
     }
 
-    // 5. Se añaden los secretos de la DB, asegurando que se les otorguen permisos.
-    if (databaseCluster.secret) {
-      backendContainerSecrets["DB_USER"] = ecs.Secret.fromSecretsManager(
-        databaseCluster.secret,
-        "username"
-      );
-      backendContainerSecrets["DB_PASSWORD"] = ecs.Secret.fromSecretsManager(
-        databaseCluster.secret,
-        "password"
-      );
-      // Incluir una sola inyección del ARN del secreto de la DB.
-      backendContainerSecrets["DB_SECRET_ARN"] = ecs.Secret.fromSecretsManager(
-        databaseCluster.secret
-      );
-    }
-    // Asegurarse de que el rol de la tarea pueda leer el secreto de la DB
-    if (databaseCluster.secret) {
-      databaseCluster.secret.grantRead(backendTask.taskRole);
-    }
-
-    // --- Fin de la corrección de secretos ---
-
     // Load Balancer + SG
     const sg = new ec2.SecurityGroup(this, "ALB-SG", {
       vpc,
@@ -331,9 +282,6 @@ export class MiwaBackendStack extends Stack {
       }),
       environment: {
         ENVIRONMENT: "production",
-        DB_HOST: databaseCluster.clusterEndpoint.hostname,
-        DB_PORT: databaseCluster.clusterEndpoint.port.toString(),
-        DB_NAME: databaseName,
         S3_BUCKET_ARN: bucketFiles?.bucketName.toString() || "",
         API_GATEWAY_URL: props.api_endpoint!,
       },
@@ -349,12 +297,6 @@ export class MiwaBackendStack extends Stack {
       desiredCount: props.desiredCount ?? 1,
       assignPublicIp: false,
     });
-
-    databaseCluster.connections.allowFrom(
-      this.backendService,
-      ec2.Port.tcp(5432),
-      "Allow backend to reach Aurora"
-    );
 
     // Frontend Task Definition
     const frontendTask = new ecs.FargateTaskDefinition(this, "frontend-task", {

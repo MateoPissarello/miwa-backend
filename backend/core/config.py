@@ -11,23 +11,17 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: str
-    API_GATEWAY_URL: str
     COGNITO_USER_POOL_ID: str
     COGNITO_CLIENT_ID: str
     AWS_REGION: str
     COGNITO_SECRET: str
-    S3_BUCKET_ARN: str
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str
     DYNAMO_GOOGLE_TOKENS_TABLE: str
     GOOGLE_STATE_SECRET: str
     GOOGLE_AFTER_CONNECT: str
-    DB_USER: str
-    DB_PASSWORD: str
-    DB_HOST: str
-    DB_PORT: str
-    DB_NAME: str
+    
 
     class Config:
         env_file = ".env"
@@ -41,11 +35,23 @@ class Settings(BaseSettings):
     def COGNITO_JWKS_URL(self) -> str:
         return f"{self.COGNITO_ISSUER}/.well-known/jwks.json"
 
-    @property
-    def DATABASE_URL(self) -> str:
-        """Build the SQLAlchemy database URL from the configured credentials."""
+    # @property
+    # def RECORDINGS_BUCKET_NAME(self) -> str:
+    #     """Return the canonical bucket name used for meeting artefacts."""
 
-        return f"postgresql+psycopg2://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+    #     if self.BUCKET_NAME:
+    #         return self.BUCKET_NAME
+    #     bucket = self.S3_BUCKET_ARN
+    #     if bucket.startswith("arn:"):
+    #         if ":::" in bucket:
+    #             bucket = bucket.split(":::")[-1]
+    #         else:
+    #             bucket = bucket.rsplit(":", 1)[-1]
+    #     if bucket.startswith("s3://"):
+    #         bucket = bucket[5:]
+    #     if "/" in bucket:
+    #         bucket = bucket.split("/", 1)[0]
+    #     return bucket
 
 
 _settings: Optional[Settings] = None
