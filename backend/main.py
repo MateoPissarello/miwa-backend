@@ -11,6 +11,7 @@ from services.auth_service.plugin import AuthPlugin
 from services.calendar_service.plugin import CalendarPlugin
 from services.s3_service.plugin import S3Plugin
 from services.translation_service.plugin import TranslationPlugin
+from services.transcription_service.plugin import TranscriptionPlugin
 
 
 def _env_flag(value: str | None) -> bool:
@@ -26,6 +27,7 @@ def create_kernel() -> Kernel:
     kernel.register_plugin(AuthPlugin())
     kernel.register_plugin(CalendarPlugin())
     kernel.register_plugin(TranslationPlugin())
+    kernel.register_plugin(TranscriptionPlugin())
     return kernel
 
 

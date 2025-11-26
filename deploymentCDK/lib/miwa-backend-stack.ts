@@ -204,6 +204,7 @@ export class MiwaBackendStack extends Stack {
       "GOOGLE_AFTER_CONNECT",
       "DYNAMO_GOOGLE_TOKENS_TABLE",
       "GOOGLE_STATE_SECRET",
+      "DYNAMO_TRANSCRIPTIONS_TABLE",
     ];
 
     for (const key of secretKeys) {

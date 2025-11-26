@@ -61,6 +61,7 @@ GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=
 GOOGLE_AFTER_CONNECT=
 DYNAMO_GOOGLE_TOKENS_TABLE=
+DYNAMO_TRANSCRIPTIONS_TABLE=
 GOOGLE_STATE_SECRET=
 
 # S3 y otros servicios
@@ -79,6 +80,8 @@ LLM_MAX_TOKENS=
 DEFAULT_URL_TTL_SEC=
 ALLOW_EXTS=
 ```
+
+- **DYNAMO_TRANSCRIPTIONS_TABLE** debe existir con clave de partición `recording_id` (tipo `S`), ya que los endpoints de transcripciones usan ese atributo como llave primaria en DynamoDB.
 
 ### Paso 3: Actualizar AWS Secrets Manager
 

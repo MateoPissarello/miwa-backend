@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     GOOGLE_STATE_SECRET: str
     GOOGLE_AFTER_CONNECT: str
     S3_BUCKET_ARN: str
+    DYNAMO_TRANSCRIPTIONS_TABLE: str
     
 
     class Config:
