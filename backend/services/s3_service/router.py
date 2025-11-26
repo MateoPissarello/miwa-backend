@@ -38,6 +38,53 @@ async def upload_endpoint(
         return url
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+        
+@router.delete("/delete/{key:path}")
+async def delete_endpoint(key: str, current_user: TokenData = Depends(get_current_user)):
+    """Delete a single object plus any derived transcriptions/summaries."""
+
+    if ".." in key:
+        raise HTTPException(status_code=400, detail="Invalid key")
+
+    email = current_user.username
+    if email is None:
+        raise HTTPException(status_code=401, detail="Email claim missing in token")
+
+    parts = key.split("/", 2)
+    if parts and parts[0] == "uploads" and len(parts) > 1 and parts[1] != email:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You can only delete your own recordings",
+        )
+
+    s3: S3Storage = get_s3_storage()
+    try:
+        deleted = await run_in_threadpool(lambda: s3.delete_key(key))
+
+        transcription_deleted = 0
+        summary_deleted = 0
+        if parts and parts[0] == "uploads" and len(parts) > 2 and parts[1] == email:
+            filename = parts[2].split("/")[-1]
+            base_name = filename.rsplit(".", 1)[0]
+            transcription_prefix = f"uploads/{email}/transcripciones/{base_name}_"
+            summary_prefix = f"uploads/{email}/resumenes/{base_name}_"
+
+            transcription_deleted = await run_in_threadpool(
+                lambda: s3.delete_prefix(transcription_prefix)
+            )
+            summary_deleted = await run_in_threadpool(
+                lambda: s3.delete_prefix(summary_prefix)
+            )
+
+        return {
+            "deleted": bool(deleted),
+            "transcriptions_deleted": transcription_deleted,
+            "summaries_deleted": summary_deleted,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/list", response_model=List[str])

@@ -164,9 +164,14 @@ export class MiwaBackendStack extends Stack {
       "GoogleTokensTable",
       "miwa_google_tokens"
     );
-
+    const transcriptionsTable = dynamodb.Table.fromTableName(
+      this,
+      "TranscriptionsTable",
+      "transcriptions_table"
+    );
     // Permisos al rol de la tarea ECS (backend)
     tokensTable.grantReadWriteData(backendTask.taskRole);
+    transcriptionsTable.grantReadWriteData(backendTask.taskRole)
     const bucketFiles = props.filesBucket;
     if (bucketFiles) {
       props.filesBucket.grantReadWrite(backendTask.taskRole);
