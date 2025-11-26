@@ -39,7 +39,8 @@ const google_stack = new MiwaGoogleTokensStack(app, "MiwaGoogleTokensStack", {
 // Domain configuration (optional - for HTTPS)
 const certificateArn = process.env.CERTIFICATE_ARN;
 const hostedZoneId = process.env.HOSTED_ZONE_ID;
-const hostedZoneName = process.env.DOMAIN_NAME;
+const hostedZoneName = process.env.HOSTED_ZONE_NAME;
+const subdomain = process.env.SUBDOMAIN;
 
 // Stack principal con ambos servicios
 const mainStack = new MiwaBackendStack(app, "MiwaBackendStack", {
@@ -51,7 +52,7 @@ const mainStack = new MiwaBackendStack(app, "MiwaBackendStack", {
     hostedZoneId: hostedZoneId,
     zoneName: hostedZoneName,
     certificateArn: certificateArn,
-    subdomain: process.env.SUBDOMAIN || "app",
+    subdomain: subdomain,
   } : undefined,
   filesBucket: lambda_and_s3.miwaBucket,
   greeterFn: lambda_and_s3.greeterFn,

@@ -371,11 +371,7 @@ export class MiwaBackendStack extends Stack {
 
     // Reglas de routing (usar el listener existente; default → frontend)
     if (httpsListener) {
-      // default
-      httpsListener.addTargetGroups("default-frontend", {
-        targetGroups: [frontendTargetGroup],
-      });
-      // /api → backend
+      // /api → backend (prioridad más alta)
       httpsListener.addTargetGroups("routes-backend", {
         conditions: [
           elasticloadbalancingv2.ListenerCondition.pathPatterns([
@@ -386,19 +382,14 @@ export class MiwaBackendStack extends Stack {
         targetGroups: [backendTargetGroup],
         priority: 1,
       });
-      // resto → frontend
-      httpsListener.addTargetGroups("routes-frontend", {
-        conditions: [
-          elasticloadbalancingv2.ListenerCondition.pathPatterns(["/*"]),
-        ],
-        targetGroups: [frontendTargetGroup],
-        priority: 2,
+      
+      // Default action → frontend (sin condiciones, es la acción por defecto)
+      httpsListener.addAction("default-frontend", {
+        action: elasticloadbalancingv2.ListenerAction.forward([frontendTargetGroup]),
       });
     } else {
-      // Solo HTTP
-      httpListener.addTargetGroups("default-frontend", {
-        targetGroups: [frontendTargetGroup],
-      });
+      // Solo HTTP - configurar reglas con prioridades
+      // /api → backend (prioridad más alta)
       httpListener.addTargetGroups("routes-backend", {
         conditions: [
           elasticloadbalancingv2.ListenerCondition.pathPatterns([
@@ -409,12 +400,10 @@ export class MiwaBackendStack extends Stack {
         targetGroups: [backendTargetGroup],
         priority: 1,
       });
-      httpListener.addTargetGroups("routes-frontend", {
-        conditions: [
-          elasticloadbalancingv2.ListenerCondition.pathPatterns(["/*"]),
-        ],
-        targetGroups: [frontendTargetGroup],
-        priority: 2,
+      
+      // Default action → frontend (sin condiciones, es la acción por defecto)
+      httpListener.addAction("default-frontend", {
+        action: elasticloadbalancingv2.ListenerAction.forward([frontendTargetGroup]),
       });
     }
 

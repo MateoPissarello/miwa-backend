@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     DYNAMO_GOOGLE_TOKENS_TABLE: str
     GOOGLE_STATE_SECRET: str
     GOOGLE_AFTER_CONNECT: str
+    S3_BUCKET_ARN: str
     
 
     class Config:
